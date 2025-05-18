@@ -61,11 +61,19 @@ export class BudgetTrackerAwsStack extends cdk.Stack {
       single.addMethod('DELETE', new apigateway.LambdaIntegration(lambdaFn));
 
       resource.addCorsPreflight({
-        allowOrigins: ['https://localhost:3000'],
+        allowOrigins: [
+          'https://localhost:3000',
+          'https://budget-tracker-5onkq23od-bozhidarn7s-projects.vercel.app',
+          'https://budget-tracker-henna-phi.vercel.app',
+        ],
         allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
       });
       single.addCorsPreflight({
-        allowOrigins: ['https://localhost:3000'],
+        allowOrigins: [
+          'https://localhost:3000',
+          'https://budget-tracker-5onkq23od-bozhidarn7s-projects.vercel.app',
+          'https://budget-tracker-henna-phi.vercel.app',
+        ],
         allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
       });
     });

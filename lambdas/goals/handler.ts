@@ -19,12 +19,13 @@ export const handler: APIGatewayProxyHandler = async (
   const { httpMethod, pathParameters, body } = event;
   const id = pathParameters?.id;
 
+  const origin = event.headers.origin || event.headers.Origin;
   try {
     if (httpMethod === 'GET' && id) {
       const res = await client.send(
         new GetItemCommand({ TableName: TABLE_NAME, Key: marshall({ id }) }),
       );
-      return buildResponse(200, unmarshall(res.Item!));
+      return buildResponse(200, unmarshall(res.Item!), origin);
     }
 
     if (httpMethod === 'GET') {
@@ -32,6 +33,7 @@ export const handler: APIGatewayProxyHandler = async (
       return buildResponse(
         200,
         res.Items?.map((item) => unmarshall(item)),
+        origin,
       );
     }
 
@@ -44,7 +46,7 @@ export const handler: APIGatewayProxyHandler = async (
       await client.send(
         new PutItemCommand({ TableName: TABLE_NAME, Item: marshall(item) }),
       );
-      return buildResponse(201, item);
+      return buildResponse(201, item, origin);
     }
 
     if (httpMethod === 'PUT' && id && body) {
@@ -53,20 +55,24 @@ export const handler: APIGatewayProxyHandler = async (
       await client.send(
         new PutItemCommand({ TableName: TABLE_NAME, Item: marshall(updated) }),
       );
-      return buildResponse(200, updated);
+      return buildResponse(200, updated, origin);
     }
 
     if (httpMethod === 'DELETE' && id) {
       await client.send(
         new DeleteItemCommand({ TableName: TABLE_NAME, Key: marshall({ id }) }),
       );
-      return buildResponse(200, { message: 'Deleted' });
+      return buildResponse(200, { message: 'Deleted' }, origin);
     }
 
-    return buildResponse(400, {
-      message: 'Unsupported method or missing data.',
-    });
+    return buildResponse(
+      400,
+      {
+        message: 'Unsupported method or missing data.',
+      },
+      origin,
+    );
   } catch (err) {
-    return buildResponse(500, { error: (err as Error).message });
+    return buildResponse(500, { error: (err as Error).message }, origin);
   }
 };
