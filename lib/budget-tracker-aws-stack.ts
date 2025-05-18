@@ -59,6 +59,15 @@ export class BudgetTrackerAwsStack extends cdk.Stack {
       single.addMethod('GET', new apigateway.LambdaIntegration(lambdaFn));
       single.addMethod('PUT', new apigateway.LambdaIntegration(lambdaFn));
       single.addMethod('DELETE', new apigateway.LambdaIntegration(lambdaFn));
+
+      resource.addCorsPreflight({
+        allowOrigins: ['https://localhost:3000'],
+        allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+      });
+      single.addCorsPreflight({
+        allowOrigins: ['https://localhost:3000'],
+        allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+      });
     });
   }
 }

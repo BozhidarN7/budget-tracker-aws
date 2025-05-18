@@ -8,6 +8,7 @@ import {
   ScanCommand,
 } from '@aws-sdk/client-dynamodb';
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
+import { buildResponse } from '../../utils';
 
 const client = new DynamoDBClient({});
 const TABLE_NAME = process.env.TABLE_NAME!;
@@ -23,15 +24,15 @@ export const handler: APIGatewayProxyHandler = async (
       const res = await client.send(
         new GetItemCommand({ TableName: TABLE_NAME, Key: marshall({ id }) }),
       );
-      return { statusCode: 200, body: JSON.stringify(unmarshall(res.Item!)) };
+      return buildResponse(200, unmarshall(res.Item!));
     }
 
     if (httpMethod === 'GET') {
       const res = await client.send(new ScanCommand({ TableName: TABLE_NAME }));
-      return {
-        statusCode: 200,
-        body: JSON.stringify(res.Items?.map((item) => unmarshall(item))),
-      };
+      return buildResponse(
+        200,
+        res.Items?.map((item) => unmarshall(item)),
+      );
     }
 
     if (httpMethod === 'POST' && body) {
@@ -44,7 +45,7 @@ export const handler: APIGatewayProxyHandler = async (
       await client.send(
         new PutItemCommand({ TableName: TABLE_NAME, Item: marshall(item) }),
       );
-      return { statusCode: 201, body: JSON.stringify({ message: 'Created' }) };
+      return buildResponse(201, item);
     }
 
     if (httpMethod === 'PUT' && id && body) {
@@ -53,24 +54,20 @@ export const handler: APIGatewayProxyHandler = async (
       await client.send(
         new PutItemCommand({ TableName: TABLE_NAME, Item: marshall(updated) }),
       );
-      return { statusCode: 200, body: JSON.stringify({ message: 'Updated' }) };
+      return buildResponse(200, updated);
     }
 
     if (httpMethod === 'DELETE' && id) {
       await client.send(
         new DeleteItemCommand({ TableName: TABLE_NAME, Key: marshall({ id }) }),
       );
-      return { statusCode: 200, body: JSON.stringify({ message: 'Deleted' }) };
+      return buildResponse(200, { message: 'Deleted' });
     }
 
-    return {
-      statusCode: 400,
-      body: JSON.stringify({ message: 'Unsupported method or missing data.' }),
-    };
+    return buildResponse(400, {
+      message: 'Unsupported method or missing data.',
+    });
   } catch (err) {
-    return {
-      statusCode: 500,
-      body: JSON.stringify({ error: (err as Error).message }),
-    };
+    return buildResponse(500, { error: (err as Error).message });
   }
 };
