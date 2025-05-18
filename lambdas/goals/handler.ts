@@ -1,3 +1,4 @@
+import { v4 as uuidv4 } from 'uuid';
 import { APIGatewayEvent, APIGatewayProxyHandler } from 'aws-lambda';
 import {
   DeleteItemCommand,
@@ -34,7 +35,11 @@ export const handler: APIGatewayProxyHandler = async (
     }
 
     if (httpMethod === 'POST' && body) {
-      const item = JSON.parse(body);
+      let item = JSON.parse(body);
+      item = {
+        id: item.id ?? uuidv4(),
+        ...item,
+      };
       await client.send(
         new PutItemCommand({ TableName: TABLE_NAME, Item: marshall(item) }),
       );
