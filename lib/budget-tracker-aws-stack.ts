@@ -17,7 +17,7 @@ export class BudgetTrackerAwsStack extends cdk.Stack {
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
 
-    new cognito.UserPoolClient(this, 'UserPoolClient', {
+    const userPoolClient = new cognito.UserPoolClient(this, 'UserPoolClient', {
       userPool,
       generateSecret: false,
       authFlows: {
@@ -114,6 +114,16 @@ export class BudgetTrackerAwsStack extends cdk.Stack {
         allowOrigins,
         allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
       });
+    });
+
+    new cdk.CfnOutput(this, 'UserPoolIdOutput', {
+      value: userPool.userPoolId,
+      exportName: 'UserPoolId',
+    });
+
+    new cdk.CfnOutput(this, 'UserPoolClientIdOutput', {
+      value: userPoolClient.userPoolClientId,
+      exportName: 'UserPoolClientId',
     });
   }
 }
