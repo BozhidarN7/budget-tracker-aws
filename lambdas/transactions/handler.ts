@@ -8,10 +8,85 @@ import {
   ScanCommand,
 } from '@aws-sdk/client-dynamodb';
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
-import { buildResponse } from '../../utils';
+import {
+  BASE_CURRENCY_CODE,
+  buildResponse,
+  convertFromBaseCurrency,
+  convertToBaseCurrency,
+  getUserPreferredCurrency,
+  normalizeCurrencyCode,
+  toCurrencyNumber,
+} from '../../utils';
+import type { CurrencyCode, Transaction } from '../../types/budget';
 
 const client = new DynamoDBClient({});
 const TABLE_NAME = process.env.TABLE_NAME!;
+const normalizeTransactionInput = async (payload: Record<string, unknown>) => {
+  const originalCurrency = normalizeCurrencyCode(payload.currency as string);
+  const originalAmount = toCurrencyNumber(payload.amount);
+
+  const { baseAmount, snapshot } = await convertToBaseCurrency(
+    originalAmount,
+    originalCurrency,
+  );
+
+  return {
+    ...payload,
+    amount: baseAmount,
+    currency: BASE_CURRENCY_CODE,
+    baseAmount,
+    baseCurrency: BASE_CURRENCY_CODE,
+    originalAmount,
+    originalCurrency,
+    exchangeRateSnapshot: snapshot,
+  } as Record<string, unknown>;
+};
+
+const toTransactionResponse = async (
+  item: Record<string, unknown>,
+  preferredCurrency: CurrencyCode,
+): Promise<Transaction> => {
+  const baseAmount = toCurrencyNumber(item.baseAmount ?? item.amount ?? 0);
+  const baseCurrency =
+    (item.baseCurrency as CurrencyCode) || BASE_CURRENCY_CODE;
+  const typedItem = item as unknown as Transaction;
+  const originalAmount = typedItem.originalAmount ?? baseAmount;
+  const originalCurrency =
+    (typedItem.originalCurrency as CurrencyCode) ?? baseCurrency;
+
+  if (preferredCurrency === baseCurrency) {
+    return {
+      ...typedItem,
+      amount: baseAmount,
+      currency: baseCurrency,
+      baseAmount,
+      baseCurrency,
+      originalAmount,
+      originalCurrency,
+      displayAmount: baseAmount,
+      displayCurrency: baseCurrency,
+      exchangeRateSnapshot: typedItem.exchangeRateSnapshot,
+    };
+  }
+
+  const { amount: convertedAmount, snapshot } = await convertFromBaseCurrency(
+    baseAmount,
+    preferredCurrency,
+  );
+
+  return {
+    ...typedItem,
+    amount: convertedAmount,
+    currency: preferredCurrency,
+    baseAmount,
+    baseCurrency,
+    originalAmount,
+    originalCurrency,
+    displayAmount: convertedAmount,
+    displayCurrency: preferredCurrency,
+    exchangeRateSnapshot: snapshot,
+  };
+};
 
 export const handler: APIGatewayProxyHandler = async (
   event: APIGatewayEvent,
@@ -26,6 +101,8 @@ export const handler: APIGatewayProxyHandler = async (
   }
 
   try {
+    const preferredCurrencyPromise = getUserPreferredCurrency(userId);
+
     if (httpMethod === 'GET' && id) {
       const res = await client.send(
         new GetItemCommand({
@@ -43,7 +120,10 @@ export const handler: APIGatewayProxyHandler = async (
         return buildResponse(403, { message: 'Forbidden' }, origin);
       }
 
-      return buildResponse(200, item, origin);
+      const preferredCurrency = await preferredCurrencyPromise;
+      const shaped = await toTransactionResponse(item, preferredCurrency);
+
+      return buildResponse(200, shaped, origin);
     }
 
     if (httpMethod === 'GET') {
@@ -53,34 +133,49 @@ export const handler: APIGatewayProxyHandler = async (
           (item) => item.userId === userId,
         ) ?? [];
 
-      return buildResponse(200, items, origin);
+      const preferredCurrency = await preferredCurrencyPromise;
+      const shaped = await Promise.all(
+        items.map((item) => toTransactionResponse(item, preferredCurrency)),
+      );
+
+      return buildResponse(200, shaped, origin);
     }
 
     if (httpMethod === 'POST' && body) {
-      let item = JSON.parse(body);
-      item = {
-        id: item.id ?? uuidv4(),
-        ...item,
+      const payload = JSON.parse(body);
+      const normalized = await normalizeTransactionInput(payload);
+      const item = {
+        id: (payload.id as string) ?? uuidv4(),
+        ...normalized,
         userId,
       };
 
       await client.send(
         new PutItemCommand({ TableName: TABLE_NAME, Item: marshall(item) }),
       );
+      const preferredCurrency = await preferredCurrencyPromise;
+      const shaped = await toTransactionResponse(item, preferredCurrency);
 
-      return buildResponse(201, item, origin);
+      return buildResponse(201, shaped, origin);
     }
 
     if (httpMethod === 'PUT' && id && body) {
-      const updated = JSON.parse(body);
-      updated.id = id;
-      updated.userId = userId;
+      const payload = JSON.parse(body);
+      const normalized = await normalizeTransactionInput(payload);
+      const updated = {
+        id,
+        ...normalized,
+        userId,
+      };
 
       await client.send(
         new PutItemCommand({ TableName: TABLE_NAME, Item: marshall(updated) }),
       );
 
-      return buildResponse(200, updated, origin);
+      const preferredCurrency = await preferredCurrencyPromise;
+      const shaped = await toTransactionResponse(updated, preferredCurrency);
+
+      return buildResponse(200, shaped, origin);
     }
 
     if (httpMethod === 'DELETE' && id) {
