@@ -13,21 +13,27 @@ import {
   buildResponse,
   convertFromBaseCurrency,
   convertToBaseCurrency,
+  createRateContext,
   getUserPreferredCurrency,
   normalizeCurrencyCode,
   toCurrencyNumber,
 } from '../../utils';
+import type { RateContext } from '../../utils';
 import type { CurrencyCode, Transaction } from '../../types/budget';
 
 const client = new DynamoDBClient({});
 const TABLE_NAME = process.env.TABLE_NAME!;
-const normalizeTransactionInput = async (payload: Record<string, unknown>) => {
+const normalizeTransactionInput = async (
+  payload: Record<string, unknown>,
+  rateContext: RateContext,
+) => {
   const originalCurrency = normalizeCurrencyCode(payload.currency as string);
   const originalAmount = toCurrencyNumber(payload.amount);
 
   const { baseAmount, snapshot } = await convertToBaseCurrency(
     originalAmount,
     originalCurrency,
+    rateContext,
   );
 
   return {
@@ -45,6 +51,7 @@ const normalizeTransactionInput = async (payload: Record<string, unknown>) => {
 const toTransactionResponse = async (
   item: Record<string, unknown>,
   preferredCurrency: CurrencyCode,
+  rateContext: RateContext,
 ): Promise<Transaction> => {
   const baseAmount = toCurrencyNumber(item.baseAmount ?? item.amount ?? 0);
   const baseCurrency =
@@ -72,6 +79,7 @@ const toTransactionResponse = async (
   const { amount: convertedAmount, snapshot } = await convertFromBaseCurrency(
     baseAmount,
     preferredCurrency,
+    rateContext,
   );
 
   return {
@@ -100,6 +108,8 @@ export const handler: APIGatewayProxyHandler = async (
     return buildResponse(401, { message: 'Unauthorized' }, origin);
   }
 
+  const rateContext = createRateContext();
+
   try {
     const preferredCurrencyPromise = getUserPreferredCurrency(userId);
 
@@ -121,7 +131,11 @@ export const handler: APIGatewayProxyHandler = async (
       }
 
       const preferredCurrency = await preferredCurrencyPromise;
-      const shaped = await toTransactionResponse(item, preferredCurrency);
+      const shaped = await toTransactionResponse(
+        item,
+        preferredCurrency,
+        rateContext,
+      );
 
       return buildResponse(200, shaped, origin);
     }
@@ -135,7 +149,9 @@ export const handler: APIGatewayProxyHandler = async (
 
       const preferredCurrency = await preferredCurrencyPromise;
       const shaped = await Promise.all(
-        items.map((item) => toTransactionResponse(item, preferredCurrency)),
+        items.map((item) =>
+          toTransactionResponse(item, preferredCurrency, rateContext),
+        ),
       );
 
       return buildResponse(200, shaped, origin);
@@ -143,7 +159,7 @@ export const handler: APIGatewayProxyHandler = async (
 
     if (httpMethod === 'POST' && body) {
       const payload = JSON.parse(body);
-      const normalized = await normalizeTransactionInput(payload);
+      const normalized = await normalizeTransactionInput(payload, rateContext);
       const item = {
         id: (payload.id as string) ?? uuidv4(),
         ...normalized,
@@ -154,14 +170,18 @@ export const handler: APIGatewayProxyHandler = async (
         new PutItemCommand({ TableName: TABLE_NAME, Item: marshall(item) }),
       );
       const preferredCurrency = await preferredCurrencyPromise;
-      const shaped = await toTransactionResponse(item, preferredCurrency);
+      const shaped = await toTransactionResponse(
+        item,
+        preferredCurrency,
+        rateContext,
+      );
 
       return buildResponse(201, shaped, origin);
     }
 
     if (httpMethod === 'PUT' && id && body) {
       const payload = JSON.parse(body);
-      const normalized = await normalizeTransactionInput(payload);
+      const normalized = await normalizeTransactionInput(payload, rateContext);
       const updated = {
         id,
         ...normalized,
@@ -173,7 +193,11 @@ export const handler: APIGatewayProxyHandler = async (
       );
 
       const preferredCurrency = await preferredCurrencyPromise;
-      const shaped = await toTransactionResponse(updated, preferredCurrency);
+      const shaped = await toTransactionResponse(
+        updated,
+        preferredCurrency,
+        rateContext,
+      );
 
       return buildResponse(200, shaped, origin);
     }

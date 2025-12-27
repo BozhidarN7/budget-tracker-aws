@@ -13,6 +13,7 @@ import {
   buildResponse,
   convertFromBaseCurrency,
   convertToBaseCurrency,
+  createRateContext,
   getUserPreferredCurrency,
   normalizeCurrencyCode,
   toCurrencyNumber,
@@ -22,12 +23,14 @@ import type {
   CategoryResponse,
   CurrencyCode,
 } from '../../types/budget';
+import type { RateContext } from '../../utils';
 
 const client = new DynamoDBClient({});
 const TABLE_NAME = process.env.TABLE_NAME!;
 const normalizeMonthlyData = async (
   monthlyData: Record<string, { limit?: unknown; spent?: unknown }>,
   sourceCurrency: CurrencyCode,
+  rateContext: RateContext,
 ): Promise<Category['monthlyData']> => {
   const entries = await Promise.all(
     Object.entries(monthlyData ?? {}).map(async ([month, value]) => {
@@ -36,8 +39,8 @@ const normalizeMonthlyData = async (
 
       const [{ baseAmount: baseLimit }, { baseAmount: baseSpent }] =
         await Promise.all([
-          convertToBaseCurrency(limit, sourceCurrency),
-          convertToBaseCurrency(spent, sourceCurrency),
+          convertToBaseCurrency(limit, sourceCurrency, rateContext),
+          convertToBaseCurrency(spent, sourceCurrency, rateContext),
         ]);
 
       return [month, { baseLimit, baseSpent }];
@@ -50,6 +53,7 @@ const normalizeMonthlyData = async (
 const shapeCategoryResponse = async (
   rawCategory: Category,
   preferredCurrency: CurrencyCode,
+  rateContext: RateContext,
 ): Promise<CategoryResponse> => {
   const baseCurrency = rawCategory.baseCurrency || BASE_CURRENCY_CODE;
   const monthlyDataEntries = await Promise.all(
@@ -63,8 +67,8 @@ const shapeCategoryResponse = async (
         }
 
         const [limitConverted, spentConverted] = await Promise.all([
-          convertFromBaseCurrency(limitBase, preferredCurrency),
-          convertFromBaseCurrency(spentBase, preferredCurrency),
+          convertFromBaseCurrency(limitBase, preferredCurrency, rateContext),
+          convertFromBaseCurrency(spentBase, preferredCurrency, rateContext),
         ]);
 
         return [
@@ -98,6 +102,8 @@ export const handler: APIGatewayProxyHandler = async (
     return buildResponse(401, { message: 'Unauthorized' }, origin);
   }
 
+  const rateContext = createRateContext();
+
   try {
     const preferredCurrencyPromise = getUserPreferredCurrency(userId);
 
@@ -116,7 +122,11 @@ export const handler: APIGatewayProxyHandler = async (
       }
 
       const preferredCurrency = await preferredCurrencyPromise;
-      const shaped = await shapeCategoryResponse(item, preferredCurrency);
+      const shaped = await shapeCategoryResponse(
+        item,
+        preferredCurrency,
+        rateContext,
+      );
 
       return buildResponse(200, shaped, origin);
     }
@@ -131,7 +141,7 @@ export const handler: APIGatewayProxyHandler = async (
       const preferredCurrency = await preferredCurrencyPromise;
       const shaped = await Promise.all(
         filteredItems.map((item) =>
-          shapeCategoryResponse(item, preferredCurrency),
+          shapeCategoryResponse(item, preferredCurrency, rateContext),
         ),
       );
 
@@ -162,6 +172,7 @@ export const handler: APIGatewayProxyHandler = async (
       const monthlyData = await normalizeMonthlyData(
         monthlyPayload,
         inputCurrency,
+        rateContext,
       );
 
       const newCategory: Category = {
@@ -185,6 +196,7 @@ export const handler: APIGatewayProxyHandler = async (
       const shaped = await shapeCategoryResponse(
         newCategory,
         preferredCurrency,
+        rateContext,
       );
 
       return buildResponse(201, shaped, origin);
@@ -214,7 +226,11 @@ export const handler: APIGatewayProxyHandler = async (
       const preferredCurrency = await preferredCurrencyPromise;
 
       const normalizedIncoming = Object.keys(incomingMonthlyData).length
-        ? await normalizeMonthlyData(incomingMonthlyData, preferredCurrency)
+        ? await normalizeMonthlyData(
+            incomingMonthlyData,
+            preferredCurrency,
+            rateContext,
+          )
         : {};
 
       const mergedMonthlyData: Category['monthlyData'] = {
@@ -236,7 +252,11 @@ export const handler: APIGatewayProxyHandler = async (
         new PutItemCommand({ TableName: TABLE_NAME, Item: marshall(updated) }),
       );
 
-      const shaped = await shapeCategoryResponse(updated, preferredCurrency);
+      const shaped = await shapeCategoryResponse(
+        updated,
+        preferredCurrency,
+        rateContext,
+      );
 
       return buildResponse(200, shaped, origin);
     }

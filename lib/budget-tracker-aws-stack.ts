@@ -98,6 +98,7 @@ export class BudgetTrackerAwsStack extends cdk.Stack {
             `../lambdas/${name.toLowerCase()}s/handler.ts`,
           ),
           handler: 'handler',
+          timeout: cdk.Duration.seconds(10),
           environment: {
             TABLE_NAME: table.tableName,
             ...sharedLambdaEnv,

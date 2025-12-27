@@ -13,22 +13,33 @@ import {
   buildResponse,
   convertFromBaseCurrency,
   convertToBaseCurrency,
+  createRateContext,
   getUserPreferredCurrency,
   normalizeCurrencyCode,
   toCurrencyNumber,
 } from '../../utils';
 import type { CurrencyCode, Goal } from '../../types/budget';
+import type { RateContext } from '../../utils';
 
 const client = new DynamoDBClient({});
 const TABLE_NAME = process.env.TABLE_NAME!;
-const normalizeGoalAmounts = async (value: number, currency: CurrencyCode) => {
-  const { baseAmount } = await convertToBaseCurrency(value, currency);
+const normalizeGoalAmounts = async (
+  value: number,
+  currency: CurrencyCode,
+  rateContext: RateContext,
+) => {
+  const { baseAmount } = await convertToBaseCurrency(
+    value,
+    currency,
+    rateContext,
+  );
   return baseAmount;
 };
 
 const shapeGoalResponse = async (
   goal: Goal,
   preferredCurrency: CurrencyCode,
+  rateContext: RateContext,
 ) => {
   const baseCurrency = goal.baseCurrency || BASE_CURRENCY_CODE;
 
@@ -42,8 +53,8 @@ const shapeGoalResponse = async (
   }
 
   const [targetConversion, currentConversion] = await Promise.all([
-    convertFromBaseCurrency(goal.target ?? 0, preferredCurrency),
-    convertFromBaseCurrency(goal.current ?? 0, preferredCurrency),
+    convertFromBaseCurrency(goal.target ?? 0, preferredCurrency, rateContext),
+    convertFromBaseCurrency(goal.current ?? 0, preferredCurrency, rateContext),
   ]);
 
   return {
@@ -66,6 +77,8 @@ export const handler: APIGatewayProxyHandler = async (
     return buildResponse(401, { message: 'Unauthorized' }, origin);
   }
 
+  const rateContext = createRateContext();
+
   try {
     const preferredCurrencyPromise = getUserPreferredCurrency(userId);
 
@@ -84,7 +97,11 @@ export const handler: APIGatewayProxyHandler = async (
       }
 
       const preferredCurrency = await preferredCurrencyPromise;
-      const shaped = await shapeGoalResponse(item, preferredCurrency);
+      const shaped = await shapeGoalResponse(
+        item,
+        preferredCurrency,
+        rateContext,
+      );
 
       return buildResponse(200, shaped, origin);
     }
@@ -98,7 +115,9 @@ export const handler: APIGatewayProxyHandler = async (
 
       const preferredCurrency = await preferredCurrencyPromise;
       const shaped = await Promise.all(
-        items.map((item) => shapeGoalResponse(item, preferredCurrency)),
+        items.map((item) =>
+          shapeGoalResponse(item, preferredCurrency, rateContext),
+        ),
       );
 
       return buildResponse(200, shaped, origin);
@@ -111,10 +130,12 @@ export const handler: APIGatewayProxyHandler = async (
       const target = await normalizeGoalAmounts(
         toCurrencyNumber(payload.target),
         currency,
+        rateContext,
       );
       const current = await normalizeGoalAmounts(
         toCurrencyNumber(payload.current ?? 0),
         currency,
+        rateContext,
       );
 
       const goal: Goal = {
@@ -133,7 +154,11 @@ export const handler: APIGatewayProxyHandler = async (
         new PutItemCommand({ TableName: TABLE_NAME, Item: marshall(goal) }),
       );
 
-      const shaped = await shapeGoalResponse(goal, preferredCurrency);
+      const shaped = await shapeGoalResponse(
+        goal,
+        preferredCurrency,
+        rateContext,
+      );
 
       return buildResponse(201, shaped, origin);
     }
@@ -161,6 +186,7 @@ export const handler: APIGatewayProxyHandler = async (
           ? await normalizeGoalAmounts(
               toCurrencyNumber(payload.target),
               currency,
+              rateContext,
             )
           : stored.target;
       const updatedCurrent =
@@ -168,6 +194,7 @@ export const handler: APIGatewayProxyHandler = async (
           ? await normalizeGoalAmounts(
               toCurrencyNumber(payload.current),
               currency,
+              rateContext,
             )
           : stored.current;
 
@@ -186,7 +213,11 @@ export const handler: APIGatewayProxyHandler = async (
         new PutItemCommand({ TableName: TABLE_NAME, Item: marshall(updated) }),
       );
 
-      const shaped = await shapeGoalResponse(updated, preferredCurrency);
+      const shaped = await shapeGoalResponse(
+        updated,
+        preferredCurrency,
+        rateContext,
+      );
 
       return buildResponse(200, shaped, origin);
     }

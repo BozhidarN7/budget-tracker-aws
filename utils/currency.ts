@@ -26,6 +26,13 @@ type RateCacheEntry = {
 
 const rateCache = new Map<string, RateCacheEntry>();
 
+export interface RateContext {
+  getSnapshot: (
+    from: CurrencyCode,
+    to: CurrencyCode,
+  ) => Promise<ExchangeRateSnapshot>;
+}
+
 const cacheKey = (from: CurrencyCode, to: CurrencyCode) => `${from}:${to}`;
 
 const supportedCurrencies = SUPPORTED_CURRENCIES_ENV.split(',')
@@ -52,7 +59,7 @@ export const toCurrencyNumber = (value: unknown): number => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-const getCurrencyApiKey = async (): Promise<string | undefined> => {
+export const getCurrencyApiKey = async (): Promise<string | undefined> => {
   if (process.env.CURRENCY_API_KEY) {
     return process.env.CURRENCY_API_KEY;
   }
@@ -72,7 +79,7 @@ const getCurrencyApiKey = async (): Promise<string | undefined> => {
   );
 
   const secretValue =
-    response.SecretString ??
+    JSON.parse(response.SecretString ?? '').CURRENCY_API_KEY ??
     (response.SecretBinary
       ? Buffer.from(response.SecretBinary as Uint8Array).toString('utf-8')
       : undefined);
@@ -88,6 +95,47 @@ const getCurrencyApiKey = async (): Promise<string | undefined> => {
 
   return secretValue;
 };
+
+function createSnapshotGetter() {
+  const pending = new Map<string, Promise<ExchangeRateSnapshot>>();
+
+  return async function getSnapshot(
+    from: CurrencyCode,
+    to: CurrencyCode,
+  ): Promise<ExchangeRateSnapshot> {
+    const key = cacheKey(from, to);
+    const cached = rateCache.get(key);
+    if (cached && cached.expiresAt > now()) {
+      return cached.snapshot;
+    }
+
+    const inFlight = pending.get(key);
+    if (inFlight) {
+      return inFlight;
+    }
+
+    const fetchPromise = fetchRate(from, to).finally(() => {
+      pending.delete(key);
+    });
+
+    pending.set(key, fetchPromise);
+    return fetchPromise;
+  };
+}
+
+const defaultGetSnapshot = createSnapshotGetter();
+
+export function createRateContext(): RateContext {
+  return {
+    getSnapshot: createSnapshotGetter(),
+  };
+}
+
+const getSnapshot = (
+  from: CurrencyCode,
+  to: CurrencyCode,
+  context?: RateContext,
+) => (context ? context.getSnapshot(from, to) : defaultGetSnapshot(from, to));
 
 async function fetchRate(
   from: CurrencyCode,
@@ -117,13 +165,7 @@ async function fetchRate(
     url.searchParams.set('apikey', apiKey);
   }
 
-  const response = await fetch(url, {
-    headers: apiKey
-      ? {
-          apikey: apiKey,
-        }
-      : undefined,
-  });
+  const response = await fetch(url);
 
   if (!response.ok) {
     throw new Error(
@@ -164,8 +206,9 @@ export async function convertAmount(
   amount: number,
   from: CurrencyCode,
   to: CurrencyCode,
+  rateContext?: RateContext,
 ) {
-  const snapshot = await fetchRate(from, to);
+  const snapshot = await getSnapshot(from, to, rateContext);
   return {
     amount: Number((amount * snapshot.rate).toFixed(2)),
     snapshot,
@@ -175,11 +218,13 @@ export async function convertAmount(
 export async function convertToBaseCurrency(
   amount: number,
   currency: CurrencyCode,
+  rateContext?: RateContext,
 ) {
   const { amount: baseAmount, snapshot } = await convertAmount(
     amount,
     currency,
     BASE_CURRENCY_CODE,
+    rateContext,
   );
   return {
     baseAmount,
@@ -190,11 +235,13 @@ export async function convertToBaseCurrency(
 export async function convertFromBaseCurrency(
   baseAmount: number,
   targetCurrency: CurrencyCode,
+  rateContext?: RateContext,
 ) {
   const { amount, snapshot } = await convertAmount(
     baseAmount,
     BASE_CURRENCY_CODE,
     targetCurrency,
+    rateContext,
   );
   return {
     amount,
