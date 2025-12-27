@@ -106,7 +106,8 @@ export const handler: APIGatewayProxyHandler = async (
 
     if (httpMethod === 'POST' && body) {
       const payload = JSON.parse(body);
-      const currency = normalizeCurrencyCode(payload.currency);
+      const preferredCurrency = await preferredCurrencyPromise;
+      const currency = normalizeCurrencyCode(preferredCurrency);
       const target = await normalizeGoalAmounts(
         toCurrencyNumber(payload.target),
         currency,
@@ -132,7 +133,6 @@ export const handler: APIGatewayProxyHandler = async (
         new PutItemCommand({ TableName: TABLE_NAME, Item: marshall(goal) }),
       );
 
-      const preferredCurrency = await preferredCurrencyPromise;
       const shaped = await shapeGoalResponse(goal, preferredCurrency);
 
       return buildResponse(201, shaped, origin);
@@ -153,9 +153,8 @@ export const handler: APIGatewayProxyHandler = async (
       }
 
       const payload = JSON.parse(body);
-      const currency = normalizeCurrencyCode(
-        (payload.currency as string) || stored.currency,
-      );
+      const preferredCurrency = await preferredCurrencyPromise;
+      const currency = normalizeCurrencyCode(preferredCurrency);
 
       const updatedTarget =
         payload.target !== undefined
@@ -187,7 +186,6 @@ export const handler: APIGatewayProxyHandler = async (
         new PutItemCommand({ TableName: TABLE_NAME, Item: marshall(updated) }),
       );
 
-      const preferredCurrency = await preferredCurrencyPromise;
       const shaped = await shapeGoalResponse(updated, preferredCurrency);
 
       return buildResponse(200, shaped, origin);

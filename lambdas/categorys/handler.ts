@@ -17,26 +17,30 @@ import {
   normalizeCurrencyCode,
   toCurrencyNumber,
 } from '../../utils';
-import type { Category, CurrencyCode } from '../../types/budget';
+import type {
+  Category,
+  CategoryResponse,
+  CurrencyCode,
+} from '../../types/budget';
 
 const client = new DynamoDBClient({});
 const TABLE_NAME = process.env.TABLE_NAME!;
 const normalizeMonthlyData = async (
-  monthlyData: Category['monthlyData'],
-  currency: CurrencyCode,
+  monthlyData: Record<string, { limit?: unknown; spent?: unknown }>,
+  sourceCurrency: CurrencyCode,
 ): Promise<Category['monthlyData']> => {
   const entries = await Promise.all(
-    Object.entries(monthlyData).map(async ([month, value]) => {
-      const { baseAmount: limit } = await convertToBaseCurrency(
-        toCurrencyNumber(value.limit),
-        currency,
-      );
-      const { baseAmount: spent } = await convertToBaseCurrency(
-        toCurrencyNumber(value.spent),
-        currency,
-      );
+    Object.entries(monthlyData ?? {}).map(async ([month, value]) => {
+      const limit = toCurrencyNumber(value?.limit ?? 0);
+      const spent = toCurrencyNumber(value?.spent ?? 0);
 
-      return [month, { limit, spent }];
+      const [{ baseAmount: baseLimit }, { baseAmount: baseSpent }] =
+        await Promise.all([
+          convertToBaseCurrency(limit, sourceCurrency),
+          convertToBaseCurrency(spent, sourceCurrency),
+        ]);
+
+      return [month, { baseLimit, baseSpent }];
     }),
   );
 
@@ -46,26 +50,16 @@ const normalizeMonthlyData = async (
 const shapeCategoryResponse = async (
   rawCategory: Category,
   preferredCurrency: CurrencyCode,
-) => {
+): Promise<CategoryResponse> => {
   const baseCurrency = rawCategory.baseCurrency || BASE_CURRENCY_CODE;
   const monthlyDataEntries = await Promise.all(
     Object.entries(rawCategory.monthlyData ?? {}).map(
       async ([month, value]) => {
-        const limitBase = toCurrencyNumber(value.limit);
-        const spentBase = toCurrencyNumber(value.spent);
+        const limitBase = toCurrencyNumber(value.baseLimit ?? 0);
+        const spentBase = toCurrencyNumber(value.baseSpent ?? 0);
 
         if (preferredCurrency === baseCurrency) {
-          return [
-            month,
-            {
-              ...value,
-              baseLimit: limitBase,
-              baseSpent: spentBase,
-              limit: limitBase,
-              spent: spentBase,
-              currency: preferredCurrency,
-            },
-          ];
+          return [month, { limit: limitBase, spent: spentBase }];
         }
 
         const [limitConverted, spentConverted] = await Promise.all([
@@ -76,12 +70,8 @@ const shapeCategoryResponse = async (
         return [
           month,
           {
-            ...value,
-            baseLimit: limitBase,
-            baseSpent: spentBase,
             limit: limitConverted.amount,
             spent: spentConverted.amount,
-            currency: preferredCurrency,
           },
         ];
       },
@@ -93,7 +83,7 @@ const shapeCategoryResponse = async (
     currency: preferredCurrency,
     baseCurrency,
     monthlyData: Object.fromEntries(monthlyDataEntries),
-  } as Category;
+  } as CategoryResponse;
 };
 
 export const handler: APIGatewayProxyHandler = async (
@@ -150,12 +140,18 @@ export const handler: APIGatewayProxyHandler = async (
 
     if (httpMethod === 'POST' && body) {
       const payload = JSON.parse(body);
+      const preferredCurrency = await preferredCurrencyPromise;
       const categoryId = payload.id ?? uuidv4();
       const month = new Date().toISOString().slice(0, 7); // 'YYYY-MM'
-      const currency = normalizeCurrencyCode(payload.currency);
+      const inputCurrency = normalizeCurrencyCode(
+        (payload.currency as string) ?? preferredCurrency,
+      );
       const monthlyPayload =
         payload.monthlyData && typeof payload.monthlyData === 'object'
-          ? (payload.monthlyData as Category['monthlyData'])
+          ? (payload.monthlyData as Record<
+              string,
+              { limit?: unknown; spent?: unknown }
+            >)
           : {
               [month]: {
                 limit: payload.limit,
@@ -163,7 +159,10 @@ export const handler: APIGatewayProxyHandler = async (
               },
             };
 
-      const monthlyData = await normalizeMonthlyData(monthlyPayload, currency);
+      const monthlyData = await normalizeMonthlyData(
+        monthlyPayload,
+        inputCurrency,
+      );
 
       const newCategory: Category = {
         id: categoryId,
@@ -171,7 +170,7 @@ export const handler: APIGatewayProxyHandler = async (
         name: payload.name,
         color: payload.color,
         type: payload.type,
-        currency,
+        currency: preferredCurrency,
         baseCurrency: BASE_CURRENCY_CODE,
         monthlyData,
       };
@@ -183,7 +182,6 @@ export const handler: APIGatewayProxyHandler = async (
         }),
       );
 
-      const preferredCurrency = await preferredCurrencyPromise;
       const shaped = await shapeCategoryResponse(
         newCategory,
         preferredCurrency,
@@ -209,13 +207,14 @@ export const handler: APIGatewayProxyHandler = async (
       }
 
       const incomingMonthlyData =
-        (payload.monthlyData as Category['monthlyData']) ?? {};
-      const currency = normalizeCurrencyCode(
-        (payload.currency as string) || existing.currency,
-      );
+        (payload.monthlyData as Record<
+          string,
+          { limit?: unknown; spent?: unknown }
+        >) ?? {};
+      const preferredCurrency = await preferredCurrencyPromise;
 
       const normalizedIncoming = Object.keys(incomingMonthlyData).length
-        ? await normalizeMonthlyData(incomingMonthlyData, currency)
+        ? await normalizeMonthlyData(incomingMonthlyData, preferredCurrency)
         : {};
 
       const mergedMonthlyData: Category['monthlyData'] = {
@@ -228,7 +227,7 @@ export const handler: APIGatewayProxyHandler = async (
         name: payload.name ?? existing.name,
         color: payload.color ?? existing.color,
         type: payload.type ?? existing.type,
-        currency,
+        currency: preferredCurrency,
         baseCurrency: BASE_CURRENCY_CODE,
         monthlyData: mergedMonthlyData,
       };
@@ -237,7 +236,6 @@ export const handler: APIGatewayProxyHandler = async (
         new PutItemCommand({ TableName: TABLE_NAME, Item: marshall(updated) }),
       );
 
-      const preferredCurrency = await preferredCurrencyPromise;
       const shaped = await shapeCategoryResponse(updated, preferredCurrency);
 
       return buildResponse(200, shaped, origin);

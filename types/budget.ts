@@ -26,6 +26,13 @@ export interface Transaction {
   userId: string;
 }
 
+export interface CategoryMonthlyEntry {
+  limit: number; // legacy amount stored in original currency
+  spent: number; // legacy amount stored in original currency
+  baseSpent: number;
+  baseLimit: number;
+}
+
 export interface Category {
   id: string;
   name: string;
@@ -34,16 +41,21 @@ export interface Category {
   currency?: CurrencyCode; // last requested display currency
   baseCurrency?: CurrencyCode; // canonical currency (EUR)
   monthlyData: {
-    [month: string]: {
-      limit: number; // stored in base currency
-      spent: number; // stored in base currency
-      displayLimit?: number; // dynamically calculated for responses
-      displaySpent?: number;
-      currency?: CurrencyCode;
-    };
+    [month: string]: CategoryMonthlyEntry;
   }; // e.g., { "2025-05": { limit: 200, spent: 120 } }
   userId: string;
 }
+
+export type CategoryResponseMonthlyEntry = {
+  limit: number; // exposed to the client in its preferred currency
+  spent: number;
+};
+
+export type CategoryResponse = Omit<Category, 'monthlyData'> & {
+  monthlyData: {
+    [month: string]: CategoryResponseMonthlyEntry;
+  };
+};
 
 export interface Goal {
   id: string;
