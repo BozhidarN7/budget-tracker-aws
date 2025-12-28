@@ -11,11 +11,20 @@ import * as targets from 'aws-cdk-lib/aws-events-targets';
 import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
 import * as sns from 'aws-cdk-lib/aws-sns';
 import * as cloudwatchActions from 'aws-cdk-lib/aws-cloudwatch-actions';
+import { BudgetTrackerStackProps } from '../types/stack-props';
 import { addCrudResource } from './api-helpers';
 
 export class BudgetTrackerAwsStack extends cdk.Stack {
-  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+  constructor(scope: Construct, id: string, props: BudgetTrackerStackProps) {
     super(scope, id, props);
+
+    const {
+      baseCurrency,
+      supportedCurrencies,
+      currencyApi,
+      currencyRates,
+      ratesAdminGroup,
+    } = props;
 
     const userPool = new cognito.UserPool(this, 'UserPool', {
       selfSignUpEnabled: false,
@@ -45,36 +54,13 @@ export class BudgetTrackerAwsStack extends cdk.Stack {
       authorizer,
     };
 
-    const baseCurrency =
-      (this.node.tryGetContext('baseCurrency') as string) || 'EUR';
-    const supportedCurrencies =
-      (this.node.tryGetContext('supportedCurrencies') as string) ||
-      'EUR,BGN,USD,GBP';
-    const currencyApiUrl =
-      (this.node.tryGetContext('currencyApiUrl') as string) ||
-      process.env.CURRENCY_API_URL ||
-      'https://api.currencyapi.com/v3/latest';
-    const currencyApiSecretArn =
-      (this.node.tryGetContext('currencyApiSecretArn') as string) ||
-      'arn:aws:secretsmanager:eu-central-1:967206684166:secret:CURRENCYAPI_KEY-W7IY2B';
-
-    const currencyApiSecret = currencyApiSecretArn
+    const currencyApiSecret = currencyApi.secretArn
       ? secretsmanager.Secret.fromSecretCompleteArn(
           this,
           'CurrencyApiSecret',
-          currencyApiSecretArn,
+          currencyApi.secretArn,
         )
       : undefined;
-
-    const persistedFreshMs = Number(
-      this.node.tryGetContext('currencyPersistedFreshMs') ??
-        24 * 60 * 60 * 1000,
-    );
-    const persistedTtlDays = Number(
-      this.node.tryGetContext('currencyPersistedTtlDays') ?? 30,
-    );
-    const ratesAdminGroup =
-      (this.node.tryGetContext('ratesAdminGroup') as string) || 'rates-admins';
 
     const userPreferencesTable = new dynamodb.Table(
       this,
@@ -105,12 +91,12 @@ export class BudgetTrackerAwsStack extends cdk.Stack {
     const sharedLambdaEnv = {
       BASE_CURRENCY: baseCurrency,
       SUPPORTED_CURRENCIES: supportedCurrencies,
-      CURRENCY_API_URL: currencyApiUrl,
+      CURRENCY_API_URL: currencyApi.url,
       CURRENCY_API_SECRET_ARN: currencyApiSecret?.secretArn ?? '',
       USER_TABLE_NAME: userPreferencesTable.tableName,
       RATES_TABLE_NAME: exchangeRatesTable.tableName,
-      CURRENCY_PERSISTED_FRESH_MS: String(persistedFreshMs),
-      CURRENCY_PERSISTED_TTL_DAYS: String(persistedTtlDays),
+      CURRENCY_PERSISTED_FRESH_MS: String(currencyRates.persistedFreshMs),
+      CURRENCY_PERSISTED_TTL_DAYS: String(currencyRates.persistedTtlDays),
     };
 
     const tables = ['Transaction', 'Category', 'Goal'].reduce(
