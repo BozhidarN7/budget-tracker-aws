@@ -11,6 +11,7 @@ import * as targets from 'aws-cdk-lib/aws-events-targets';
 import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
 import * as sns from 'aws-cdk-lib/aws-sns';
 import * as cloudwatchActions from 'aws-cdk-lib/aws-cloudwatch-actions';
+import * as iam from 'aws-cdk-lib/aws-iam';
 import { BudgetTrackerStackProps } from '../types/stack-props';
 import { addCrudResource } from './api-helpers';
 
@@ -164,6 +165,12 @@ export class BudgetTrackerAwsStack extends cdk.Stack {
 
     exchangeRatesTable.grantReadWriteData(ratesRefreshLambda);
     currencyApiSecret?.grantRead(ratesRefreshLambda);
+    ratesRefreshLambda.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['cloudwatch:PutMetricData'],
+        resources: ['*'],
+      }),
+    );
 
     const manualRatesRefreshLambda = new lambda.NodejsFunction(
       this,
@@ -181,6 +188,12 @@ export class BudgetTrackerAwsStack extends cdk.Stack {
 
     exchangeRatesTable.grantReadWriteData(manualRatesRefreshLambda);
     currencyApiSecret?.grantRead(manualRatesRefreshLambda);
+    manualRatesRefreshLambda.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['cloudwatch:PutMetricData'],
+        resources: ['*'],
+      }),
+    );
 
     const api = new apigateway.RestApi(this, 'BudgetTrackerApi', {
       restApiName: 'Budget Tracker Service',

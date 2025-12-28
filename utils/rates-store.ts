@@ -145,7 +145,7 @@ const setLastRefreshEpoch = async (epoch: number, manual?: boolean) => {
         fromCurrency: META_PARTITION_KEY,
         toCurrency: META_SORT_KEY,
         lastRefreshEpoch: epoch,
-        lastManualRefreshEpoch: manual ? epoch : undefined,
+        ...(manual ? { lastManualRefreshEpoch: epoch } : {}),
       }),
     }),
   );
