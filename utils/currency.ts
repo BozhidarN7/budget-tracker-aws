@@ -1,23 +1,25 @@
-import {
-  GetSecretValueCommand,
-  SecretsManagerClient,
-} from '@aws-sdk/client-secrets-manager';
 import type { CurrencyCode, ExchangeRateSnapshot } from '../types/budget';
+import {
+  BASE_CURRENCY_CODE,
+  CACHE_TTL_MS,
+  CURRENCY_API_URL,
+  RATE_PROVIDER,
+  getSupportedCurrencies as getConfiguredCurrencies,
+  getCurrencyApiKey,
+} from './currency-config';
+import { getPersistedRate, putPersistedRate } from './rates-store';
 
-const secretsClient = new SecretsManagerClient({});
-let cachedSecret: { value: string; expiresAt: number } | null = null;
-const SECRET_CACHE_TTL_MS = Number(
-  process.env.CURRENCY_SECRET_CACHE_TTL_MS ?? 5 * 60 * 1000,
-);
-
-const BASE_CURRENCY_ENV = (process.env.BASE_CURRENCY as CurrencyCode) || 'EUR';
-const SUPPORTED_CURRENCIES_ENV =
-  process.env.SUPPORTED_CURRENCIES || BASE_CURRENCY_ENV;
-const CURRENCY_API_URL =
-  process.env.CURRENCY_API_URL || 'https://api.currencyapi.com/v3/latest';
-const CURRENCY_API_SECRET_ARN = process.env.CURRENCY_API_SECRET_ARN;
-const RATE_PROVIDER = process.env.CURRENCY_RATE_PROVIDER || 'currencyapi.com';
-const CACHE_TTL_MS = Number(process.env.CURRENCY_CACHE_TTL_MS ?? 5 * 60 * 1000);
+export {
+  refreshAllRates,
+  type RefreshRatesOptions,
+  type RefreshRatesResult,
+  getLastRefreshEpoch,
+} from './rates-store';
+export {
+  BASE_CURRENCY_CODE,
+  isSupportedCurrency,
+  normalizeCurrencyCode,
+} from './currency-config';
 
 type RateCacheEntry = {
   snapshot: ExchangeRateSnapshot;
@@ -25,6 +27,9 @@ type RateCacheEntry = {
 };
 
 const rateCache = new Map<string, RateCacheEntry>();
+const cacheKey = (from: CurrencyCode, to: CurrencyCode) => `${from}:${to}`;
+const supportedCurrencies = getConfiguredCurrencies();
+const now = () => Date.now();
 
 export interface RateContext {
   getSnapshot: (
@@ -33,23 +38,7 @@ export interface RateContext {
   ) => Promise<ExchangeRateSnapshot>;
 }
 
-const cacheKey = (from: CurrencyCode, to: CurrencyCode) => `${from}:${to}`;
-
-const supportedCurrencies = SUPPORTED_CURRENCIES_ENV.split(',')
-  .map((currency) => currency.trim())
-  .filter(Boolean) as CurrencyCode[];
-
-const now = () => Date.now();
-
-export const isSupportedCurrency = (
-  currency?: string,
-): currency is CurrencyCode =>
-  !!currency && supportedCurrencies.includes(currency as CurrencyCode);
-
-export const normalizeCurrencyCode = (currency?: string): CurrencyCode =>
-  isSupportedCurrency(currency)
-    ? (currency as CurrencyCode)
-    : BASE_CURRENCY_CODE;
+export const getSupportedCurrencyCodes = () => supportedCurrencies;
 
 export const toCurrencyNumber = (value: unknown): number => {
   if (typeof value === 'number') {
@@ -57,43 +46,6 @@ export const toCurrencyNumber = (value: unknown): number => {
   }
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
-};
-
-export const getCurrencyApiKey = async (): Promise<string | undefined> => {
-  if (process.env.CURRENCY_API_KEY) {
-    return process.env.CURRENCY_API_KEY;
-  }
-
-  if (!CURRENCY_API_SECRET_ARN) {
-    return undefined;
-  }
-
-  if (cachedSecret && cachedSecret.expiresAt > now()) {
-    return cachedSecret.value;
-  }
-
-  const response = await secretsClient.send(
-    new GetSecretValueCommand({
-      SecretId: CURRENCY_API_SECRET_ARN,
-    }),
-  );
-
-  const secretValue =
-    JSON.parse(response.SecretString ?? '').CURRENCY_API_KEY ??
-    (response.SecretBinary
-      ? Buffer.from(response.SecretBinary as Uint8Array).toString('utf-8')
-      : undefined);
-
-  if (!secretValue) {
-    throw new Error('Currency API secret is empty');
-  }
-
-  cachedSecret = {
-    value: secretValue,
-    expiresAt: now() + SECRET_CACHE_TTL_MS,
-  };
-
-  return secretValue;
 };
 
 function createSnapshotGetter() {
@@ -137,6 +89,13 @@ const getSnapshot = (
   context?: RateContext,
 ) => (context ? context.getSnapshot(from, to) : defaultGetSnapshot(from, to));
 
+const rememberRate = (snapshot: ExchangeRateSnapshot) => {
+  rateCache.set(cacheKey(snapshot.fromCurrency, snapshot.toCurrency), {
+    snapshot,
+    expiresAt: now() + CACHE_TTL_MS,
+  });
+};
+
 async function fetchRate(
   from: CurrencyCode,
   to: CurrencyCode,
@@ -153,8 +112,19 @@ async function fetchRate(
 
   const key = cacheKey(from, to);
   const cached = rateCache.get(key);
-  if (cached && cached.expiresAt > now()) {
+  const nowMs = now();
+  if (cached && cached.expiresAt > nowMs) {
     return cached.snapshot;
+  }
+
+  const persisted = await getPersistedRate(from, to);
+  if (
+    persisted?.freshUntilEpoch !== undefined &&
+    persisted.freshUntilEpoch > nowMs
+  ) {
+    const freshSnapshot = { ...persisted.snapshot, stale: false };
+    rememberRate(freshSnapshot);
+    return freshSnapshot;
   }
 
   const apiKey = await getCurrencyApiKey();
@@ -165,40 +135,47 @@ async function fetchRate(
     url.searchParams.set('apikey', apiKey);
   }
 
-  const response = await fetch(url);
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(
+        `Failed to fetch exchange rate ${from}->${to}: ${response.status} ${response.statusText}`,
+      );
+    }
 
-  if (!response.ok) {
-    throw new Error(
-      `Failed to fetch exchange rate ${from}->${to}: ${response.status} ${response.statusText}`,
-    );
+    const payload = (await response.json()) as {
+      data?: Record<string, { value: number }>;
+    };
+
+    const rate = payload.data?.[to]?.value;
+    if (typeof rate !== 'number') {
+      throw new Error(`Exchange rate not found for ${from}->${to}`);
+    }
+
+    const snapshot: ExchangeRateSnapshot = {
+      fromCurrency: from,
+      toCurrency: to,
+      rate,
+      provider: RATE_PROVIDER,
+      capturedAt: new Date().toISOString(),
+      stale: false,
+    };
+
+    rememberRate(snapshot);
+    await putPersistedRate(snapshot);
+    return snapshot;
+  } catch (err) {
+    if (persisted?.snapshot) {
+      const fallback: ExchangeRateSnapshot = {
+        ...persisted.snapshot,
+        stale: true,
+      };
+      rememberRate(fallback);
+      return fallback;
+    }
+    throw err;
   }
-
-  const payload = (await response.json()) as {
-    data?: Record<string, { value: number }>;
-  };
-
-  const rate = payload.data?.[to]?.value;
-  if (typeof rate !== 'number') {
-    throw new Error(`Exchange rate not found for ${from}->${to}`);
-  }
-
-  const snapshot: ExchangeRateSnapshot = {
-    fromCurrency: from,
-    toCurrency: to,
-    rate,
-    provider: RATE_PROVIDER,
-    capturedAt: new Date().toISOString(),
-  };
-
-  rateCache.set(key, {
-    snapshot,
-    expiresAt: now() + CACHE_TTL_MS,
-  });
-
-  return snapshot;
 }
-
-export const BASE_CURRENCY_CODE = BASE_CURRENCY_ENV;
 
 export const getSupportedCurrencies = () => supportedCurrencies;
 

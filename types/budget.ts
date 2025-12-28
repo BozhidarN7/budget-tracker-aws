@@ -6,6 +6,7 @@ export interface ExchangeRateSnapshot {
   rate: number;
   provider: string;
   capturedAt: string;
+  stale?: boolean;
 }
 
 export interface Transaction {
