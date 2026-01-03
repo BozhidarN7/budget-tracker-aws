@@ -12,6 +12,7 @@ import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
 import * as sns from 'aws-cdk-lib/aws-sns';
 import * as cloudwatchActions from 'aws-cdk-lib/aws-cloudwatch-actions';
 import * as iam from 'aws-cdk-lib/aws-iam';
+import { Runtime } from 'aws-cdk-lib/aws-lambda';
 import { BudgetTrackerStackProps } from '../types/stack-props';
 import { addCrudResource } from './api-helpers';
 
@@ -122,6 +123,7 @@ export class BudgetTrackerAwsStack extends cdk.Stack {
           ),
           handler: 'handler',
           timeout: cdk.Duration.seconds(10),
+          runtime: Runtime.NODEJS_22_X,
           environment: {
             TABLE_NAME: table.tableName,
             ...sharedLambdaEnv,
@@ -144,6 +146,7 @@ export class BudgetTrackerAwsStack extends cdk.Stack {
       {
         entry: path.join(__dirname, '../lambdas/users/handler.ts'),
         handler: 'handler',
+        runtime: Runtime.NODEJS_22_X,
         environment: sharedLambdaEnv,
       },
     );
@@ -158,6 +161,7 @@ export class BudgetTrackerAwsStack extends cdk.Stack {
       {
         entry: path.join(__dirname, '../lambdas/rates/refresh.ts'),
         handler: 'scheduledHandler',
+        runtime: Runtime.NODEJS_22_X,
         timeout: cdk.Duration.seconds(30),
         environment: sharedLambdaEnv,
       },
@@ -178,6 +182,7 @@ export class BudgetTrackerAwsStack extends cdk.Stack {
       {
         entry: path.join(__dirname, '../lambdas/rates/refresh.ts'),
         handler: 'manualHandler',
+        runtime: Runtime.NODEJS_22_X,
         timeout: cdk.Duration.seconds(30),
         environment: {
           ...sharedLambdaEnv,
