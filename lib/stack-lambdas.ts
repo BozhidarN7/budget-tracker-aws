@@ -5,6 +5,7 @@ import * as lambda from 'aws-cdk-lib/aws-lambda-nodejs';
 import type * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import type * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import { Construct } from 'constructs';
+import { Runtime } from 'aws-cdk-lib/aws-lambda';
 
 export type SharedLambdaEnv = Record<string, string> & {
   BASE_CURRENCY: string;
@@ -58,6 +59,7 @@ export const createLambdaResources = (
         ),
         handler: 'handler',
         timeout: cdk.Duration.seconds(10),
+        runtime: Runtime.NODEJS_22_X,
         environment: {
           TABLE_NAME: table.tableName,
           ...sharedLambdaEnv,
@@ -80,6 +82,7 @@ export const createLambdaResources = (
     {
       entry: path.join(__dirname, '../lambdas/users/handler.ts'),
       handler: 'handler',
+      runtime: Runtime.NODEJS_22_X,
       environment: sharedLambdaEnv,
     },
   );
@@ -97,6 +100,7 @@ export const createLambdaResources = (
         '../lambdas/recurring-transactions/handler.ts',
       ),
       handler: 'handler',
+      runtime: Runtime.NODEJS_22_X,
       environment: {
         TABLE_NAME: recurringTransactionsTable.tableName,
         ...sharedLambdaEnv,
@@ -115,6 +119,7 @@ export const createLambdaResources = (
     {
       entry: path.join(__dirname, '../lambdas/rates/refresh.ts'),
       handler: 'scheduledHandler',
+      runtime: Runtime.NODEJS_22_X,
       timeout: cdk.Duration.seconds(30),
       environment: sharedLambdaEnv,
     },
@@ -135,6 +140,7 @@ export const createLambdaResources = (
     {
       entry: path.join(__dirname, '../lambdas/rates/refresh.ts'),
       handler: 'manualHandler',
+      runtime: Runtime.NODEJS_22_X,
       timeout: cdk.Duration.seconds(30),
       environment: {
         ...sharedLambdaEnv,
