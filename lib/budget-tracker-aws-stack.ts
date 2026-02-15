@@ -152,6 +152,38 @@ export class BudgetTrackerAwsStack extends cdk.Stack {
     exchangeRatesTable.grantReadWriteData(userLambda);
     currencyApiSecret?.grantRead(userLambda);
 
+    const recurringTransactionsTable = new dynamodb.Table(
+      this,
+      'RecurringTransactionsTable',
+      {
+        partitionKey: { name: 'id', type: dynamodb.AttributeType.STRING },
+        billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+        tableName: 'recurring-transactions',
+        removalPolicy: cdk.RemovalPolicy.DESTROY,
+      },
+    );
+
+    const recurringTransactionsLambda = new lambda.NodejsFunction(
+      this,
+      'RecurringTransactionsHandler',
+      {
+        entry: path.join(
+          __dirname,
+          '../lambdas/recurring-transactions/handler.ts',
+        ),
+        handler: 'handler',
+        environment: {
+          TABLE_NAME: recurringTransactionsTable.tableName,
+          ...sharedLambdaEnv,
+        },
+      },
+    );
+
+    recurringTransactionsTable.grantReadWriteData(recurringTransactionsLambda);
+    userPreferencesTable.grantReadData(recurringTransactionsLambda);
+    exchangeRatesTable.grantReadWriteData(recurringTransactionsLambda);
+    currencyApiSecret?.grantRead(recurringTransactionsLambda);
+
     const ratesRefreshLambda = new lambda.NodejsFunction(
       this,
       'RatesRefreshHandler',
@@ -214,6 +246,14 @@ export class BudgetTrackerAwsStack extends cdk.Stack {
         authOptions,
         allowOrigins,
       ),
+    );
+
+    addCrudResource(
+      api,
+      'recurring-transactions',
+      recurringTransactionsLambda,
+      authOptions,
+      allowOrigins,
     );
 
     const ratesResource = api.root.addResource('rates');
