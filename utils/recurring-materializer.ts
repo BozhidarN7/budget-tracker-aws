@@ -3,7 +3,7 @@ import {
   DynamoDBClient,
   GetItemCommand,
   PutItemCommand,
-  ScanCommand,
+  QueryCommand,
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
@@ -245,8 +245,12 @@ const scanAllRecurring = async (): Promise<RecurringTransaction[]> => {
   let ExclusiveStartKey: Record<string, Record<string, unknown>> | undefined;
   do {
     const res = await client.send(
-      new ScanCommand({
+      new QueryCommand({
         TableName: table,
+        IndexName: 'status-nextOccurrence-index',
+        KeyConditionExpression: '#status = :active',
+        ExpressionAttributeNames: { '#status': 'status' },
+        ExpressionAttributeValues: marshall({ ':active': 'active' }),
         ExclusiveStartKey,
       }),
     );
@@ -271,9 +275,7 @@ export const materializeDueForUser = async (
   };
   const timezone = await getUserTimezone(userId);
   const all = await scanAllRecurring();
-  const userRecurring = all.filter(
-    (r) => r.userId === userId && r.status === 'active',
-  );
+  const userRecurring = all.filter((r) => r.userId === userId);
 
   for (const rule of userRecurring) {
     summary.processed += 1;
@@ -292,9 +294,8 @@ export const materializeRecurring =
       failures: 0,
     };
     const all = await scanAllRecurring();
-    const active = all.filter((r) => r.status === 'active');
     const byUser = new Map<string, RecurringTransaction[]>();
-    for (const r of active) {
+    for (const r of all) {
       if (!byUser.has(r.userId)) byUser.set(r.userId, []);
       byUser.get(r.userId)!.push(r);
     }

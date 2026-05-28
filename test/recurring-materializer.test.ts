@@ -6,6 +6,7 @@ process.env.USER_TABLE_NAME = 'test-users';
 import {
   DynamoDBClient,
   PutItemCommand,
+  QueryCommand,
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
@@ -75,6 +76,7 @@ describe('materializeDueForUser', () => {
     expect(summary.processed).toBe(1);
     expect(mockSend).toHaveBeenCalledWith(expect.any(PutItemCommand));
     expect(mockSend).toHaveBeenCalledWith(expect.any(UpdateItemCommand));
+    expect(mockSend).toHaveBeenCalledWith(expect.any(QueryCommand));
   });
 
   it('skips duplicate and still advances', async () => {
