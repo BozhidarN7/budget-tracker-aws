@@ -37,6 +37,10 @@ export interface Transaction {
   category: string;
   type: 'income' | 'expense';
   userId: string;
+  recurrenceId?: string;
+  recurrenceInstanceDate?: string;
+  recurrenceInstanceId?: string;
+  materializedAt?: string;
 }
 
 export interface CategoryMonthlyEntry {
@@ -88,6 +92,7 @@ export interface Goal {
 export interface UserPreference {
   userId: string;
   preferredCurrency: CurrencyCode;
+  timezone?: string;
   updatedAt: string;
 }
 
@@ -109,4 +114,11 @@ export interface RecurringTransaction {
   nextOccurrence: string; // yyyy-MM-dd
   status: RecurringStatus;
   userId: string;
+}
+
+export interface MaterializationSummary {
+  processed: number;
+  created: number;
+  skipped: number;
+  failures: number;
 }
