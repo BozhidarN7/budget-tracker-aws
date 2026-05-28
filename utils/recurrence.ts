@@ -53,6 +53,14 @@ const getFrequencyDays = (frequency: RecurringFrequency) =>
 const getInterval = (rule: RecurringRule) =>
   typeof rule.interval === 'number' && rule.interval > 0 ? rule.interval : 1;
 
+const getLocalCalendarDate = (instant: Date, timeZone: string): string =>
+  new Intl.DateTimeFormat('en-CA', {
+    timeZone: timeZone || 'UTC',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(instant);
+
 export const normalizeRecurringRule = (rule: RecurringRule): RecurringRule => {
   const dayOfMonth =
     rule.frequency === 'monthly'
@@ -112,10 +120,17 @@ export const getNextOccurrence = (rule: RecurringRule, fromDate: string) => {
 
 export const computeNextOccurrence = (
   rule: RecurringRule,
-  fromDate = new Date(),
+  reference: Date | string = new Date(),
+  timeZone?: string,
 ) => {
+  const target =
+    timeZone && reference instanceof Date
+      ? getLocalCalendarDate(reference, timeZone)
+      : typeof reference === 'string'
+        ? reference
+        : formatDate(reference);
+
   let pointer = buildInitialNextOccurrence(rule);
-  const target = formatDate(fromDate);
 
   while (compareDates(pointer, target) < 0) {
     pointer = getNextOccurrence(rule, pointer);
@@ -123,6 +138,20 @@ export const computeNextOccurrence = (
 
   return pointer;
 };
+
+export const isDueInUserTimezone = (
+  occurrenceDate: string,
+  timeZone: string,
+  now: Date = new Date(),
+): boolean => {
+  const localDate = getLocalCalendarDate(now, timeZone);
+  return compareDates(occurrenceDate, localDate) <= 0;
+};
+
+export const advanceOccurrencePointer = (
+  rule: RecurringRule,
+  currentOccurrence: string,
+): string => getNextOccurrence(rule, currentOccurrence);
 
 export const getStatusForOccurrence = (
   nextOccurrence: string,

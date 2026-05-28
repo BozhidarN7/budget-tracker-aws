@@ -39,12 +39,16 @@ export const getUserPreference = async (
   }
 
   const record = unmarshall(res.Item) as UserPreference;
-  return {
+  const result: UserPreference = {
     userId,
     preferredCurrency:
       (record.preferredCurrency as CurrencyCode) || BASE_CURRENCY,
     updatedAt: record.updatedAt,
   };
+  if (record.timezone) {
+    result.timezone = record.timezone;
+  }
+  return result;
 };
 
 export const getUserPreferredCurrency = async (
@@ -57,6 +61,7 @@ export const getUserPreferredCurrency = async (
 export const saveUserPreference = async (
   userId: string,
   preferredCurrency: CurrencyCode,
+  timezone?: string,
 ): Promise<UserPreference> => {
   if (!TABLE_NAME) {
     throw new Error('USER_TABLE_NAME is not configured');
@@ -67,6 +72,9 @@ export const saveUserPreference = async (
     preferredCurrency,
     updatedAt: new Date().toISOString(),
   };
+  if (timezone) {
+    preference.timezone = timezone;
+  }
 
   await client.send(
     new PutItemCommand({
@@ -76,4 +84,9 @@ export const saveUserPreference = async (
   );
 
   return preference;
+};
+
+export const getUserTimezone = async (userId: string): Promise<string> => {
+  const pref = await getUserPreference(userId);
+  return pref.timezone || 'UTC';
 };
