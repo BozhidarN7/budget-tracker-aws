@@ -9,6 +9,7 @@ export interface ApiResourcesParams {
   recurringTransactionsLambda: lambda.NodejsFunction;
   manualRatesRefreshLambda: lambda.NodejsFunction;
   userLambda: lambda.NodejsFunction;
+  recurringMaterializeLambda: lambda.NodejsFunction;
   authOptions: apigateway.MethodOptions;
   allowOrigins: string[];
 }
@@ -23,6 +24,7 @@ export const createApiResources = (
     recurringTransactionsLambda,
     manualRatesRefreshLambda,
     userLambda,
+    recurringMaterializeLambda,
     authOptions,
     allowOrigins,
   } = params;
@@ -37,13 +39,24 @@ export const createApiResources = (
     ),
   );
 
-  addCrudResource(
+  const recurringResource = addCrudResource(
     api,
     'recurring-transactions',
     recurringTransactionsLambda,
     authOptions,
     allowOrigins,
   );
+
+  const materializeResource = recurringResource.addResource('materialize');
+  materializeResource.addMethod(
+    'POST',
+    new apigateway.LambdaIntegration(recurringMaterializeLambda),
+    authOptions,
+  );
+  materializeResource.addCorsPreflight({
+    allowOrigins,
+    allowMethods: ['POST', 'OPTIONS'],
+  });
 
   const ratesResource = api.root.addResource('rates');
   const refreshResource = ratesResource.addResource('refresh');

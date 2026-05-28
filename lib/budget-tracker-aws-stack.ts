@@ -56,6 +56,7 @@ export class BudgetTrackerAwsStack extends cdk.Stack {
       ratesRefreshLambda,
       manualRatesRefreshLambda,
       recurringMaterializerLambda,
+      recurringMaterializeLambda,
     } = createLambdaResources(this, {
       sharedLambdaEnv,
       tables,
@@ -83,6 +84,7 @@ export class BudgetTrackerAwsStack extends cdk.Stack {
       recurringTransactionsLambda,
       manualRatesRefreshLambda,
       userLambda,
+      recurringMaterializeLambda,
       authOptions,
       allowOrigins,
     });
