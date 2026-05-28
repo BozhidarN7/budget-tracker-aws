@@ -14,10 +14,16 @@ export interface MonitoringResources {
 export const createMonitoringResources = (
   scope: Construct,
   ratesRefreshLambda: lambda.NodejsFunction,
+  recurringMaterializerLambda: lambda.NodejsFunction,
 ): MonitoringResources => {
   new events.Rule(scope, 'RatesHourlyRefreshRule', {
     schedule: events.Schedule.rate(cdk.Duration.hours(1)),
     targets: [new targets.LambdaFunction(ratesRefreshLambda)],
+  });
+
+  new events.Rule(scope, 'RecurringMaterializerHourlyRule', {
+    schedule: events.Schedule.rate(cdk.Duration.hours(1)),
+    targets: [new targets.LambdaFunction(recurringMaterializerLambda)],
   });
 
   const ratesAlertsTopic = new sns.Topic(scope, 'RatesAlertsTopic');

@@ -24,6 +24,7 @@ export interface CrudLambdaResources {
   recurringTransactionsLambda: lambda.NodejsFunction;
   ratesRefreshLambda: lambda.NodejsFunction;
   manualRatesRefreshLambda: lambda.NodejsFunction;
+  recurringMaterializerLambda: lambda.NodejsFunction;
 }
 
 export interface LambdaResourceParams {
@@ -158,11 +159,44 @@ export const createLambdaResources = (
     }),
   );
 
+  const recurringMaterializerLambda = new lambda.NodejsFunction(
+    scope,
+    'RecurringMaterializerHandler',
+    {
+      entry: path.join(
+        __dirname,
+        '../lambdas/recurring-materializer/handler.ts',
+      ),
+      handler: 'handler',
+      runtime: Runtime.NODEJS_22_X,
+      timeout: cdk.Duration.seconds(60),
+      environment: {
+        ...sharedLambdaEnv,
+        TRANSACTIONS_TABLE_NAME: tables['Transaction'].tableName,
+        CATEGORIES_TABLE_NAME: tables['Category'].tableName,
+        RECURRING_TRANSACTIONS_TABLE_NAME: recurringTransactionsTable.tableName,
+        USER_TABLE_NAME: userPreferencesTable.tableName,
+      },
+    },
+  );
+
+  tables['Transaction'].grantReadWriteData(recurringMaterializerLambda);
+  tables['Category'].grantReadWriteData(recurringMaterializerLambda);
+  recurringTransactionsTable.grantReadWriteData(recurringMaterializerLambda);
+  userPreferencesTable.grantReadData(recurringMaterializerLambda);
+  recurringMaterializerLambda.addToRolePolicy(
+    new iam.PolicyStatement({
+      actions: ['cloudwatch:PutMetricData'],
+      resources: ['*'],
+    }),
+  );
+
   return {
     lambdas,
     userLambda,
     recurringTransactionsLambda,
     ratesRefreshLambda,
     manualRatesRefreshLambda,
+    recurringMaterializerLambda,
   };
 };
