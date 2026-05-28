@@ -55,6 +55,7 @@ export class BudgetTrackerAwsStack extends cdk.Stack {
       recurringTransactionsLambda,
       ratesRefreshLambda,
       manualRatesRefreshLambda,
+      recurringMaterializerLambda,
     } = createLambdaResources(this, {
       sharedLambdaEnv,
       tables,
@@ -89,6 +90,7 @@ export class BudgetTrackerAwsStack extends cdk.Stack {
     const { ratesAlertsTopic } = createMonitoringResources(
       this,
       ratesRefreshLambda,
+      recurringMaterializerLambda,
     );
 
     new cdk.CfnOutput(this, 'UserPoolIdOutput', {
