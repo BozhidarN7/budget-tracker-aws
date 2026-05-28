@@ -60,6 +60,13 @@ export const createDataTables = (scope: Construct): DataTables => {
     },
   );
 
+  recurringTransactionsTable.addGlobalSecondaryIndex({
+    indexName: 'status-nextOccurrence-index',
+    partitionKey: { name: 'status', type: dynamodb.AttributeType.STRING },
+    sortKey: { name: 'nextOccurrence', type: dynamodb.AttributeType.STRING },
+    projectionType: dynamodb.ProjectionType.ALL,
+  });
+
   return {
     userPreferencesTable,
     exchangeRatesTable,
