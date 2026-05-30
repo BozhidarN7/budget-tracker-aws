@@ -22,7 +22,7 @@ export const createMonitoringResources = (
   });
 
   new events.Rule(scope, 'RecurringMaterializerHourlyRule', {
-    schedule: events.Schedule.rate(cdk.Duration.hours(1)),
+    schedule: events.Schedule.rate(cdk.Duration.days(1)),
     targets: [new targets.LambdaFunction(recurringMaterializerLambda)],
   });
 

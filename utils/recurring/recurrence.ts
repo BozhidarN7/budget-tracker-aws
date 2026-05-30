@@ -2,7 +2,7 @@ import type {
   RecurringFrequency,
   RecurringRule,
   RecurringStatus,
-} from '../types/budget';
+} from '../../types/budget';
 
 const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 

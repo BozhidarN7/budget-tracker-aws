@@ -1,6 +1,6 @@
 import { APIGatewayEvent, APIGatewayProxyHandler } from 'aws-lambda';
 import { buildResponse } from '../../utils';
-import { materializeDueForUser } from '../../utils/recurring-materializer';
+import { materializeDueForUser } from '../../utils/recurring';
 
 export const handler: APIGatewayProxyHandler = async (
   event: APIGatewayEvent,

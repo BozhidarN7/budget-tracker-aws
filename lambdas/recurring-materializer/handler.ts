@@ -3,7 +3,7 @@ import {
   CloudWatchClient,
   PutMetricDataCommand,
 } from '@aws-sdk/client-cloudwatch';
-import { materializeRecurring } from '../../utils/recurring-materializer';
+import { materializeRecurring } from '../../utils/recurring';
 
 const cloudWatchClient = new CloudWatchClient({});
 const metricNamespace = 'BudgetTracker/RecurringMaterializer';

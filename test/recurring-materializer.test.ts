@@ -3,8 +3,23 @@ process.env.CATEGORIES_TABLE_NAME = 'test-categories';
 process.env.RECURRING_TRANSACTIONS_TABLE_NAME = 'test-recurring';
 process.env.USER_TABLE_NAME = 'test-users';
 
+let mockSend: jest.Mock;
+
+jest.mock('@aws-sdk/client-dynamodb', () => {
+  const actual = jest.requireActual('@aws-sdk/client-dynamodb');
+  mockSend = jest.fn();
+  return {
+    ...actual,
+    DynamoDBClient: jest.fn().mockImplementation(() => {
+      const instance = Object.create(actual.DynamoDBClient.prototype);
+      instance.send = mockSend;
+      instance.config = { region: 'us-east-1' };
+      return instance;
+    }),
+  };
+});
+
 import {
-  DynamoDBClient,
   PutItemCommand,
   QueryCommand,
   UpdateItemCommand,
@@ -15,15 +30,7 @@ import {
   buildMaterializedTransaction,
   materializeDueForUser,
   materializeRecurring,
-} from '../utils/recurring-materializer';
-
-jest.mock('@aws-sdk/client-dynamodb');
-
-const mockSend = jest.fn();
-
-(DynamoDBClient as jest.Mock).mockImplementation(() => ({
-  send: mockSend,
-}));
+} from '../utils/recurring';
 
 const makeRecurring = (
   overrides: Partial<RecurringTransaction> = {},
@@ -64,10 +71,11 @@ describe('materializeDueForUser', () => {
   it('creates one txn for a due monthly, increments category, advances pointer', async () => {
     const rec = makeRecurring();
     mockSend
-      .mockResolvedValueOnce({ Items: [marshall(rec)] }) // scan
       .mockResolvedValueOnce({}) // getUserTimezone falls back
+      .mockResolvedValueOnce({ Items: [marshall(rec)] }) // scan query for recurring
       .mockResolvedValueOnce({ Item: undefined }) // txn not exists
       .mockResolvedValueOnce({}) // put txn success
+      .mockResolvedValueOnce({ Items: [marshall({ id: 'cat-1' })] }) // cat name scan resolves to id
       .mockResolvedValueOnce({}) // update category
       .mockResolvedValueOnce({}); // put updated recurring
 
@@ -82,8 +90,8 @@ describe('materializeDueForUser', () => {
   it('skips duplicate and still advances', async () => {
     const rec = makeRecurring();
     mockSend
-      .mockResolvedValueOnce({ Items: [marshall(rec)] })
-      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({}) // tz
+      .mockResolvedValueOnce({ Items: [marshall(rec)] }) // scan
       .mockResolvedValueOnce({ Item: marshall({ id: 'dup' }) }) // exists
       .mockResolvedValueOnce({}); // advance put
 
@@ -95,9 +103,11 @@ describe('materializeDueForUser', () => {
   it('ignores paused and completed', async () => {
     const paused = makeRecurring({ id: 'p1', status: 'paused' });
     const completed = makeRecurring({ id: 'c1', status: 'completed' });
-    mockSend.mockResolvedValueOnce({
-      Items: [marshall(paused), marshall(completed)],
-    });
+    mockSend
+      .mockResolvedValueOnce({}) // tz
+      .mockResolvedValueOnce({
+        Items: [marshall(paused), marshall(completed)],
+      }); // scan no actives
 
     const summary = await materializeDueForUser('user-1');
     expect(summary.processed).toBe(0);
@@ -106,9 +116,9 @@ describe('materializeDueForUser', () => {
   it('counts failure and does not advance on error', async () => {
     const rec = makeRecurring();
     mockSend
-      .mockResolvedValueOnce({ Items: [marshall(rec)] })
-      .mockResolvedValueOnce({})
-      .mockRejectedValueOnce(new Error('boom'));
+      .mockResolvedValueOnce({}) // tz
+      .mockResolvedValueOnce({ Items: [marshall(rec)] }) // scan
+      .mockRejectedValueOnce(new Error('boom')); // txn get fails -> materializer catch
 
     const summary = await materializeDueForUser('user-1');
     expect(summary.failures).toBe(1);
@@ -147,11 +157,11 @@ describe('category spend only for expense', () => {
   it('does not call category update for income recurring', async () => {
     const incomeRec = makeRecurring({ type: 'income' });
     mockSend
-      .mockResolvedValueOnce({ Items: [marshall(incomeRec)] })
-      .mockResolvedValueOnce({})
-      .mockResolvedValueOnce({ Item: undefined })
-      .mockResolvedValueOnce({})
-      .mockResolvedValueOnce({}); // only the recurring advance, no category update
+      .mockResolvedValueOnce({}) // tz
+      .mockResolvedValueOnce({ Items: [marshall(incomeRec)] }) // scan
+      .mockResolvedValueOnce({ Item: undefined }) // txn
+      .mockResolvedValueOnce({}) // put txn
+      .mockResolvedValueOnce({}); // advance , no cat scan/update for income
 
     await materializeDueForUser('user-1');
     const updateCalls = mockSend.mock.calls.filter(

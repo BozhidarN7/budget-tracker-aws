@@ -7,7 +7,7 @@ import {
   isDueInUserTimezone,
   normalizeRecurringRule,
   validateRecurringRule,
-} from '../utils/recurrence';
+} from '../utils/recurring';
 import type { RecurringRule } from '../types/budget';
 
 describe('recurrence utilities', () => {
