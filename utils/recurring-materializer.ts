@@ -3,8 +3,8 @@ import {
   DynamoDBClient,
   GetItemCommand,
   PutItemCommand,
-  QueryCommand,
   UpdateItemCommand,
+  paginateQuery,
 } from '@aws-sdk/client-dynamodb';
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 import type {
@@ -242,25 +242,23 @@ const scanAllRecurring = async (): Promise<RecurringTransaction[]> => {
     'RECURRING_TRANSACTIONS_TABLE_NAME',
   );
   const items: RecurringTransaction[] = [];
-  let ExclusiveStartKey: Record<string, Record<string, unknown>> | undefined;
-  do {
-    const res = await client.send(
-      new QueryCommand({
-        TableName: table,
-        IndexName: 'status-nextOccurrence-index',
-        KeyConditionExpression: '#status = :active',
-        ExpressionAttributeNames: { '#status': 'status' },
-        ExpressionAttributeValues: marshall({ ':active': 'active' }),
-        ExclusiveStartKey,
-      }),
-    );
-    if (res.Items) {
+  const paginator = paginateQuery(
+    { client },
+    {
+      TableName: table,
+      IndexName: 'status-nextOccurrence-index',
+      KeyConditionExpression: '#status = :active',
+      ExpressionAttributeNames: { '#status': 'status' },
+      ExpressionAttributeValues: marshall({ ':active': 'active' }),
+    },
+  );
+  for await (const page of paginator) {
+    if (page.Items) {
       items.push(
-        ...res.Items.map((i) => unmarshall(i) as RecurringTransaction),
+        ...page.Items.map((i) => unmarshall(i) as RecurringTransaction),
       );
     }
-    ExclusiveStartKey = res.LastEvaluatedKey;
-  } while (ExclusiveStartKey);
+  }
   return items;
 };
 
