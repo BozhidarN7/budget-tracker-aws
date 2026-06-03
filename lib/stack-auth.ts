@@ -10,12 +10,18 @@ export interface AuthResources {
   authOptions: apigateway.MethodOptions;
 }
 
-export const createAuthResources = (scope: Construct): AuthResources => {
+export const createAuthResources = (
+  scope: Construct,
+  environmentName: 'dev' | 'prod',
+): AuthResources => {
   const userPool = new cognito.UserPool(scope, 'UserPool', {
     selfSignUpEnabled: false,
     signInAliases: { username: true },
     autoVerify: { email: false },
     removalPolicy: cdk.RemovalPolicy.RETAIN,
+    // Keep prod unnamed to avoid forcing recreation of the existing pool.
+    userPoolName:
+      environmentName === 'dev' ? 'budget-tracker-users-dev' : undefined,
   });
 
   const userPoolClient = new cognito.UserPoolClient(scope, 'UserPoolClient', {
