@@ -1,8 +1,6 @@
-const allowedOrigins = [
-  'https://localhost:3000',
-  'https://budget-tracker-5onkq23od-bozhidarn7s-projects.vercel.app',
-  'https://budget-tracker-henna-phi.vercel.app',
-];
+const allowedOrigins = (process.env.ALLOW_ORIGINS ?? '')
+  .split(',')
+  .filter(Boolean);
 
 const buildResponse = (statusCode: number, body: unknown, origin?: string) => {
   const headers: Record<string, string> = {

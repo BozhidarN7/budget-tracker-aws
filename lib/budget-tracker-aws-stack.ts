@@ -14,6 +14,8 @@ export class BudgetTrackerAwsStack extends cdk.Stack {
     super(scope, id, props);
 
     const {
+      environmentName,
+      allowOrigins,
       baseCurrency,
       supportedCurrencies,
       currencyApi,
@@ -21,7 +23,10 @@ export class BudgetTrackerAwsStack extends cdk.Stack {
       ratesAdminGroup,
     } = props;
 
-    const { userPool, userPoolClient, authOptions } = createAuthResources(this);
+    const { userPool, userPoolClient, authOptions } = createAuthResources(
+      this,
+      environmentName,
+    );
 
     const currencyApiSecret = currencyApi.secretArn
       ? secretsmanager.Secret.fromSecretCompleteArn(
@@ -36,9 +41,10 @@ export class BudgetTrackerAwsStack extends cdk.Stack {
       exchangeRatesTable,
       recurringTransactionsTable,
       tables,
-    } = createDataTables(this);
+    } = createDataTables(this, environmentName);
 
     const sharedLambdaEnv = {
+      ALLOW_ORIGINS: allowOrigins.join(','),
       BASE_CURRENCY: baseCurrency,
       SUPPORTED_CURRENCIES: supportedCurrencies,
       CURRENCY_API_URL: currencyApi.url,
@@ -69,14 +75,8 @@ export class BudgetTrackerAwsStack extends cdk.Stack {
 
     const api = new apigateway.RestApi(this, 'BudgetTrackerApi', {
       restApiName: 'Budget Tracker Service',
-      deployOptions: { stageName: 'prod' },
+      deployOptions: { stageName: environmentName },
     });
-
-    const allowOrigins = [
-      'https://localhost:3000',
-      'https://budget-tracker-5onkq23od-bozhidarn7s-projects.vercel.app',
-      'https://budget-tracker-henna-phi.vercel.app',
-    ];
 
     createApiResources(this, {
       api,
@@ -95,21 +95,24 @@ export class BudgetTrackerAwsStack extends cdk.Stack {
       recurringMaterializerLambda,
     );
 
+    const getExportName = (baseName: string): string =>
+      environmentName === 'prod' ? baseName : `${baseName}-dev`;
+
     new cdk.CfnOutput(this, 'UserPoolIdOutput', {
       value: userPool.userPoolId,
-      exportName: 'UserPoolId',
+      exportName: getExportName('UserPoolId'),
     });
     new cdk.CfnOutput(this, 'UserPoolClientIdOutput', {
       value: userPoolClient.userPoolClientId,
-      exportName: 'UserPoolClientId',
+      exportName: getExportName('UserPoolClientId'),
     });
     new cdk.CfnOutput(this, 'ExchangeRatesTableNameOutput', {
       value: exchangeRatesTable.tableName,
-      exportName: 'ExchangeRatesTableName',
+      exportName: getExportName('ExchangeRatesTableName'),
     });
     new cdk.CfnOutput(this, 'RatesAlertsTopicArn', {
       value: ratesAlertsTopic.topicArn,
-      exportName: 'RatesAlertsTopicArn',
+      exportName: getExportName('RatesAlertsTopicArn'),
     });
   }
 }
