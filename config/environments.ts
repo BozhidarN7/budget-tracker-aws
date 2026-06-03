@@ -1,5 +1,6 @@
 export const environments = {
   dev: {
+    allowOrigins: ['https://localhost:3000'],
     baseCurrency: 'EUR',
     supportedCurrencies: 'EUR,BGN,USD,GBP',
     currencyApi: {
@@ -15,6 +16,11 @@ export const environments = {
   },
 
   prod: {
+    allowOrigins: [
+      'https://budget-tracker-5onkq23od-bozhidarn7s-projects.vercel.app',
+      'https://budget-tracker-henna-phi.vercel.app',
+      'https://localhost:3000',
+    ],
     baseCurrency: 'EUR',
     supportedCurrencies: 'EUR,BGN,USD,GBP',
     currencyApi: {
