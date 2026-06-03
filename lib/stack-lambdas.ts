@@ -8,6 +8,7 @@ import { Construct } from 'constructs';
 import { Runtime } from 'aws-cdk-lib/aws-lambda';
 
 export type SharedLambdaEnv = Record<string, string> & {
+  ALLOW_ORIGINS: string;
   BASE_CURRENCY: string;
   SUPPORTED_CURRENCIES: string;
   CURRENCY_API_URL: string;

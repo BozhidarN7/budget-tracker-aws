@@ -9,7 +9,15 @@ export interface DataTables {
   tables: Record<string, dynamodb.Table>;
 }
 
-export const createDataTables = (scope: Construct): DataTables => {
+const getPhysicalName = (
+  environmentName: 'dev' | 'prod',
+  baseName: string,
+): string => (environmentName === 'prod' ? baseName : `${baseName}-dev`);
+
+export const createDataTables = (
+  scope: Construct,
+  environmentName: 'dev' | 'prod',
+): DataTables => {
   const userPreferencesTable = new dynamodb.Table(
     scope,
     'UserPreferencesTable',
@@ -19,7 +27,7 @@ export const createDataTables = (scope: Construct): DataTables => {
         type: dynamodb.AttributeType.STRING,
       },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-      tableName: 'users',
+      tableName: getPhysicalName(environmentName, 'users'),
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     },
   );
@@ -31,7 +39,7 @@ export const createDataTables = (scope: Construct): DataTables => {
     },
     sortKey: { name: 'toCurrency', type: dynamodb.AttributeType.STRING },
     billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-    tableName: 'exchangeRates',
+    tableName: getPhysicalName(environmentName, 'exchangeRates'),
     removalPolicy: cdk.RemovalPolicy.DESTROY,
     timeToLiveAttribute: 'ttlEpoch',
   });
@@ -41,7 +49,7 @@ export const createDataTables = (scope: Construct): DataTables => {
       acc[name] = new dynamodb.Table(scope, `${name}Table`, {
         partitionKey: { name: 'id', type: dynamodb.AttributeType.STRING },
         billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-        tableName: name.toLowerCase() + 's',
+        tableName: getPhysicalName(environmentName, name.toLowerCase() + 's'),
         removalPolicy: cdk.RemovalPolicy.DESTROY,
       });
       return acc;
@@ -55,7 +63,7 @@ export const createDataTables = (scope: Construct): DataTables => {
     {
       partitionKey: { name: 'id', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-      tableName: 'recurring-transactions',
+      tableName: getPhysicalName(environmentName, 'recurring-transactions'),
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     },
   );
