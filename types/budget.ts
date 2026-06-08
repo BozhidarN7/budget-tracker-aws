@@ -34,6 +34,7 @@ export interface Transaction {
   displayCurrency?: CurrencyCode;
   exchangeRateSnapshot?: ExchangeRateSnapshot;
   date: string;
+  dateKey?: string;
   category: string;
   type: 'income' | 'expense';
   userId: string;
@@ -41,6 +42,11 @@ export interface Transaction {
   recurrenceInstanceDate?: string;
   recurrenceInstanceId?: string;
   materializedAt?: string;
+}
+
+export interface PaginatedTransactionsResponse {
+  items: Transaction[];
+  nextCursor?: string;
 }
 
 export interface CategoryMonthlyEntry {

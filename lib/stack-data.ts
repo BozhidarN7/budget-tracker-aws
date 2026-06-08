@@ -75,6 +75,13 @@ export const createDataTables = (
     projectionType: dynamodb.ProjectionType.ALL,
   });
 
+  tables.Transaction.addGlobalSecondaryIndex({
+    indexName: 'userId-dateKey-index',
+    partitionKey: { name: 'userId', type: dynamodb.AttributeType.STRING },
+    sortKey: { name: 'dateKey', type: dynamodb.AttributeType.STRING },
+    projectionType: dynamodb.ProjectionType.ALL,
+  });
+
   return {
     userPreferencesTable,
     exchangeRatesTable,
