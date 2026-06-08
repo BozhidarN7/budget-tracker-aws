@@ -5,96 +5,27 @@ import {
   DynamoDBClient,
   GetItemCommand,
   PutItemCommand,
-  ScanCommand,
+  QueryCommand,
 } from '@aws-sdk/client-dynamodb';
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 import {
-  BASE_CURRENCY_CODE,
   buildResponse,
-  convertFromBaseCurrency,
-  convertToBaseCurrency,
   createRateContext,
   getUserPreferredCurrency,
-  normalizeCurrencyCode,
-  toCurrencyNumber,
 } from '../../utils';
-import type { RateContext } from '../../utils';
-import type { CurrencyCode, Transaction } from '../../types/budget';
+import type { PaginatedTransactionsResponse } from '../../types/budget';
+import {
+  decodeCursor,
+  encodeCursor,
+  normalizeTransactionInput,
+  parseLimit,
+  toTransactionResponse,
+  withTransactionIndexFields,
+} from './helpers';
 
 const client = new DynamoDBClient({});
 const TABLE_NAME = process.env.TABLE_NAME!;
-const normalizeTransactionInput = async (
-  payload: Record<string, unknown>,
-  rateContext: RateContext,
-) => {
-  const originalCurrency = normalizeCurrencyCode(payload.currency as string);
-  const originalAmount = toCurrencyNumber(payload.amount);
-
-  const { baseAmount, snapshot } = await convertToBaseCurrency(
-    originalAmount,
-    originalCurrency,
-    rateContext,
-  );
-
-  return {
-    ...payload,
-    amount: baseAmount,
-    currency: BASE_CURRENCY_CODE,
-    baseAmount,
-    baseCurrency: BASE_CURRENCY_CODE,
-    originalAmount,
-    originalCurrency,
-    exchangeRateSnapshot: snapshot,
-  } as Record<string, unknown>;
-};
-
-const toTransactionResponse = async (
-  item: Record<string, unknown>,
-  preferredCurrency: CurrencyCode,
-  rateContext: RateContext,
-): Promise<Transaction> => {
-  const baseAmount = toCurrencyNumber(item.baseAmount ?? item.amount ?? 0);
-  const baseCurrency =
-    (item.baseCurrency as CurrencyCode) || BASE_CURRENCY_CODE;
-  const typedItem = item as unknown as Transaction;
-  const originalAmount = typedItem.originalAmount ?? baseAmount;
-  const originalCurrency =
-    (typedItem.originalCurrency as CurrencyCode) ?? baseCurrency;
-
-  if (preferredCurrency === baseCurrency) {
-    return {
-      ...typedItem,
-      amount: baseAmount,
-      currency: baseCurrency,
-      baseAmount,
-      baseCurrency,
-      originalAmount,
-      originalCurrency,
-      displayAmount: baseAmount,
-      displayCurrency: baseCurrency,
-      exchangeRateSnapshot: typedItem.exchangeRateSnapshot,
-    };
-  }
-
-  const { amount: convertedAmount, snapshot } = await convertFromBaseCurrency(
-    baseAmount,
-    preferredCurrency,
-    rateContext,
-  );
-
-  return {
-    ...typedItem,
-    amount: convertedAmount,
-    currency: preferredCurrency,
-    baseAmount,
-    baseCurrency,
-    originalAmount,
-    originalCurrency,
-    displayAmount: convertedAmount,
-    displayCurrency: preferredCurrency,
-    exchangeRateSnapshot: snapshot,
-  };
-};
+const TRANSACTIONS_BY_USER_INDEX = 'userId-dateKey-index';
 
 export const handler: APIGatewayProxyHandler = async (
   event: APIGatewayEvent,
@@ -141,30 +72,60 @@ export const handler: APIGatewayProxyHandler = async (
     }
 
     if (httpMethod === 'GET') {
-      const res = await client.send(new ScanCommand({ TableName: TABLE_NAME }));
-      const items =
-        res.Items?.map((item) => unmarshall(item)).filter(
-          (item) => item.userId === userId,
-        ) ?? [];
+      let limit: number;
+      let exclusiveStartKey: Record<string, unknown> | undefined;
+
+      try {
+        limit = parseLimit(event.queryStringParameters?.limit);
+        exclusiveStartKey = decodeCursor(event.queryStringParameters?.cursor);
+      } catch (error) {
+        return buildResponse(
+          400,
+          { message: (error as Error).message },
+          origin,
+        );
+      }
+
+      const res = await client.send(
+        new QueryCommand({
+          TableName: TABLE_NAME,
+          IndexName: TRANSACTIONS_BY_USER_INDEX,
+          KeyConditionExpression: 'userId = :userId',
+          ExpressionAttributeValues: marshall({ ':userId': userId }),
+          ExclusiveStartKey: exclusiveStartKey
+            ? marshall(exclusiveStartKey)
+            : undefined,
+          Limit: limit,
+          ScanIndexForward: false,
+        }),
+      );
+      const items = res.Items?.map((item) => unmarshall(item)) ?? [];
 
       const preferredCurrency = await preferredCurrencyPromise;
-      const shaped = await Promise.all(
+      const shapedItems = await Promise.all(
         items.map((item) =>
           toTransactionResponse(item, preferredCurrency, rateContext),
         ),
       );
+      const response: PaginatedTransactionsResponse = {
+        items: shapedItems,
+      };
 
-      return buildResponse(200, shaped, origin);
+      if (res.LastEvaluatedKey) {
+        response.nextCursor = encodeCursor(unmarshall(res.LastEvaluatedKey));
+      }
+
+      return buildResponse(200, response, origin);
     }
 
     if (httpMethod === 'POST' && body) {
       const payload = JSON.parse(body);
       const normalized = await normalizeTransactionInput(payload, rateContext);
-      const item = {
+      const item = withTransactionIndexFields({
         id: (payload.id as string) ?? uuidv4(),
         ...normalized,
         userId,
-      };
+      });
 
       await client.send(
         new PutItemCommand({ TableName: TABLE_NAME, Item: marshall(item) }),
@@ -180,13 +141,30 @@ export const handler: APIGatewayProxyHandler = async (
     }
 
     if (httpMethod === 'PUT' && id && body) {
+      const existing = await client.send(
+        new GetItemCommand({
+          TableName: TABLE_NAME,
+          Key: marshall({ id }),
+        }),
+      );
+
+      if (!existing.Item) {
+        return buildResponse(404, { message: 'Transaction not found' }, origin);
+      }
+
+      const existingItem = unmarshall(existing.Item);
+      if (existingItem.userId !== userId) {
+        return buildResponse(403, { message: 'Forbidden' }, origin);
+      }
+
       const payload = JSON.parse(body);
       const normalized = await normalizeTransactionInput(payload, rateContext);
-      const updated = {
+      const updated = withTransactionIndexFields({
+        ...existingItem,
         id,
         ...normalized,
         userId,
-      };
+      });
 
       await client.send(
         new PutItemCommand({ TableName: TABLE_NAME, Item: marshall(updated) }),

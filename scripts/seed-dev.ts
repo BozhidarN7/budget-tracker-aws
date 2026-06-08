@@ -16,6 +16,7 @@ import type {
   Transaction,
   UserPreference,
 } from '../types/budget.ts';
+import { buildDateKey } from '../utils';
 
 const client = new DynamoDBClient({
   region: process.env.AWS_REGION ?? process.env.AWS_DEFAULT_REGION,
@@ -454,10 +455,11 @@ const buildTransactions = (userId: string): Transaction[] => {
       ? pickFrom(incomeTransactionTemplates)
       : pickFrom(expenseTransactionTemplates);
     const amount = randomBetween(template.min, template.max);
-    const date = addDays(now, -randomInt(0, 180));
+    const date = toIsoDate(addDays(now, -randomInt(0, 180)));
+    const id = randomUUID();
 
     transactions.push({
-      id: randomUUID(),
+      id,
       userId,
       description: template.description,
       amount,
@@ -466,7 +468,8 @@ const buildTransactions = (userId: string): Transaction[] => {
       baseCurrency: BASE_CURRENCY,
       originalAmount: amount,
       originalCurrency: BASE_CURRENCY,
-      date: toIsoDate(date),
+      date,
+      dateKey: buildDateKey(date, id),
       category: template.category,
       type: template.type,
     });
