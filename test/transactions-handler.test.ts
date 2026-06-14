@@ -1,3 +1,4 @@
+/* eslint-disable max-lines */
 process.env.TABLE_NAME = 'test-transactions';
 
 let mockSend: jest.Mock;
@@ -135,6 +136,50 @@ describe('transactions handler', () => {
     });
   });
 
+  it('queries a specific month and year using the user date index', async () => {
+    mockSend.mockResolvedValueOnce({ Items: [] });
+
+    const response = await handler(
+      buildEvent({
+        queryStringParameters: { month: '5', year: '2024', limit: '10' },
+      }),
+      {} as never,
+      () => undefined,
+    );
+
+    expect(response?.statusCode).toBe(200);
+    const command = mockSend.mock.calls[0][0] as QueryCommand;
+    expect(command.input.IndexName).toBe('userId-dateKey-index');
+    expect(command.input.KeyConditionExpression).toBe(
+      'userId = :userId AND begins_with(dateKey, :monthPrefix)',
+    );
+    expect(command.input.ExpressionAttributeValues).toEqual({
+      ':userId': { S: 'user-1' },
+      ':monthPrefix': { S: '2024-05-' },
+    });
+    expect(command.input.ScanIndexForward).toBe(false);
+    expect(command.input.Limit).toBe(10);
+  });
+
+  it('defaults monthly queries to the current year', async () => {
+    mockSend.mockResolvedValueOnce({ Items: [] });
+
+    const response = await handler(
+      buildEvent({
+        queryStringParameters: { month: '5' },
+      }),
+      {} as never,
+      () => undefined,
+    );
+
+    expect(response?.statusCode).toBe(200);
+    const command = mockSend.mock.calls[0][0] as QueryCommand;
+    expect(command.input.ExpressionAttributeValues).toEqual({
+      ':userId': { S: 'user-1' },
+      ':monthPrefix': { S: '2026-05-' },
+    });
+  });
+
   it('rejects an invalid cursor', async () => {
     const response = await handler(
       buildEvent({
@@ -150,6 +195,51 @@ describe('transactions handler', () => {
     });
   });
 
+  it('rejects an invalid month', async () => {
+    const response = await handler(
+      buildEvent({
+        queryStringParameters: { month: '13' },
+      }),
+      {} as never,
+      () => undefined,
+    );
+
+    expect(response?.statusCode).toBe(400);
+    expect(parseBody(response as { body: string })).toEqual({
+      message: 'Month must be an integer between 1 and 12',
+    });
+  });
+
+  it('rejects an invalid year', async () => {
+    const response = await handler(
+      buildEvent({
+        queryStringParameters: { month: '5', year: 'abc' },
+      }),
+      {} as never,
+      () => undefined,
+    );
+
+    expect(response?.statusCode).toBe(400);
+    expect(parseBody(response as { body: string })).toEqual({
+      message: 'Year must be a valid integer',
+    });
+  });
+
+  it('rejects year without month', async () => {
+    const response = await handler(
+      buildEvent({
+        queryStringParameters: { year: '2024' },
+      }),
+      {} as never,
+      () => undefined,
+    );
+
+    expect(response?.statusCode).toBe(400);
+    expect(parseBody(response as { body: string })).toEqual({
+      message: 'Year cannot be provided without month',
+    });
+  });
+
   it('writes dateKey on create', async () => {
     mockSend.mockResolvedValueOnce({});
 
@@ -160,7 +250,7 @@ describe('transactions handler', () => {
           description: 'Coffee',
           amount: 5,
           currency: 'EUR',
-          date: '2026-05-01',
+          date: 'May 1, 2026',
           category: 'food',
           type: 'expense',
         }),
@@ -173,7 +263,7 @@ describe('transactions handler', () => {
     const command = mockSend.mock.calls[0][0] as PutItemCommand;
     expect(unmarshall(command.input.Item ?? {})).toMatchObject({
       id: 'generated-id',
-      date: '2026-05-01',
+      date: 'May 1, 2026',
       dateKey: '2026-05-01#generated-id',
       userId: 'user-1',
     });
@@ -208,7 +298,7 @@ describe('transactions handler', () => {
       Item: {
         id: { S: 'txn-1' },
         userId: { S: 'user-2' },
-        date: { S: '2026-05-01' },
+        date: { S: 'May 1, 2026' },
       },
     });
 
@@ -244,7 +334,7 @@ describe('transactions handler', () => {
           baseCurrency: { S: 'EUR' },
           originalAmount: { N: '5' },
           originalCurrency: { S: 'EUR' },
-          date: { S: '2026-05-01' },
+          date: { S: 'May 1, 2026' },
           dateKey: { S: '2026-05-01#txn-1' },
           category: { S: 'food' },
           type: { S: 'expense' },
@@ -261,7 +351,7 @@ describe('transactions handler', () => {
           description: 'Updated',
           amount: 10,
           currency: 'EUR',
-          date: '2026-05-03',
+          date: 'May 3, 2026',
           category: 'food',
           type: 'expense',
         }),
@@ -274,7 +364,7 @@ describe('transactions handler', () => {
     const command = mockSend.mock.calls[1][0] as PutItemCommand;
     expect(unmarshall(command.input.Item ?? {})).toMatchObject({
       id: 'txn-1',
-      date: '2026-05-03',
+      date: 'May 3, 2026',
       dateKey: '2026-05-03#txn-1',
       userId: 'user-1',
     });
