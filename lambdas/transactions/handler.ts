@@ -22,6 +22,7 @@ import {
   toTransactionResponse,
   withTransactionIndexFields,
 } from './helpers';
+import parseMonthQuery from './helpers/parse-month-query';
 
 const client = new DynamoDBClient({});
 const TABLE_NAME = process.env.TABLE_NAME!;
@@ -74,10 +75,15 @@ export const handler: APIGatewayProxyHandler = async (
     if (httpMethod === 'GET') {
       let limit: number;
       let exclusiveStartKey: Record<string, unknown> | undefined;
+      let monthPrefix: string | undefined;
 
       try {
         limit = parseLimit(event.queryStringParameters?.limit);
         exclusiveStartKey = decodeCursor(event.queryStringParameters?.cursor);
+        ({ monthPrefix } = parseMonthQuery(
+          event.queryStringParameters?.month,
+          event.queryStringParameters?.year,
+        ));
       } catch (error) {
         return buildResponse(
           400,
@@ -90,8 +96,14 @@ export const handler: APIGatewayProxyHandler = async (
         new QueryCommand({
           TableName: TABLE_NAME,
           IndexName: TRANSACTIONS_BY_USER_INDEX,
-          KeyConditionExpression: 'userId = :userId',
-          ExpressionAttributeValues: marshall({ ':userId': userId }),
+          KeyConditionExpression: monthPrefix
+            ? 'userId = :userId AND begins_with(dateKey, :monthPrefix)'
+            : 'userId = :userId',
+          ExpressionAttributeValues: marshall(
+            monthPrefix
+              ? { ':userId': userId, ':monthPrefix': monthPrefix }
+              : { ':userId': userId },
+          ),
           ExclusiveStartKey: exclusiveStartKey
             ? marshall(exclusiveStartKey)
             : undefined,
