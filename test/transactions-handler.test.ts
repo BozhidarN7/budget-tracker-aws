@@ -161,6 +161,51 @@ describe('transactions handler', () => {
     expect(command.input.Limit).toBe(10);
   });
 
+  it('returns all user transactions for /transactions/all', async () => {
+    mockSend.mockResolvedValueOnce({
+      Items: [
+        {
+          id: { S: 'txn-1' },
+          userId: { S: 'user-1' },
+          description: { S: 'Coffee' },
+          amount: { N: '5' },
+          currency: { S: 'EUR' },
+          baseAmount: { N: '5' },
+          baseCurrency: { S: 'EUR' },
+          category: { S: 'food' },
+          type: { S: 'expense' },
+          date: { S: '2026-05-01' },
+          dateKey: { S: '2026-05-01#txn-1' },
+        },
+      ],
+    });
+
+    const response = await handler(
+      buildEvent({
+        path: '/transactions/all',
+        resource: '/transactions/all',
+      }),
+      {} as never,
+      () => undefined,
+    );
+
+    expect(response?.statusCode).toBe(200);
+    expect(mockSend).toHaveBeenCalledWith(expect.any(QueryCommand));
+    const command = mockSend.mock.calls[0][0] as QueryCommand;
+    expect(command.input.IndexName).toBe('userId-dateKey-index');
+    expect(command.input.KeyConditionExpression).toBe('userId = :userId');
+    expect(command.input.ScanIndexForward).toBe(false);
+    expect(command.input.Limit).toBeUndefined();
+    expect(command.input.ExclusiveStartKey).toBeUndefined();
+    expect(parseBody(response as { body: string })).toEqual([
+      expect.objectContaining({
+        id: 'txn-1',
+        userId: 'user-1',
+        description: 'Coffee',
+      }),
+    ]);
+  });
+
   it('defaults monthly queries to the current year', async () => {
     mockSend.mockResolvedValueOnce({ Items: [] });
 

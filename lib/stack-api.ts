@@ -39,6 +39,22 @@ export const createApiResources = (
     ),
   );
 
+  const transactionsLambda = lambdas.Transaction;
+  if (transactionsLambda) {
+    const transactionsAllResource = api.root
+      .getResource('transactions')
+      ?.addResource('all');
+    transactionsAllResource?.addMethod(
+      'GET',
+      new apigateway.LambdaIntegration(transactionsLambda),
+      authOptions,
+    );
+    transactionsAllResource?.addCorsPreflight({
+      allowOrigins,
+      allowMethods: ['GET', 'OPTIONS'],
+    });
+  }
+
   const recurringResource = addCrudResource(
     api,
     'recurring-transactions',

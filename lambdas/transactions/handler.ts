@@ -31,9 +31,12 @@ const TRANSACTIONS_BY_USER_INDEX = 'userId-dateKey-index';
 export const handler: APIGatewayProxyHandler = async (
   event: APIGatewayEvent,
 ) => {
-  const { httpMethod, pathParameters, body, requestContext } = event;
+  const { httpMethod, pathParameters, body, requestContext, resource, path } =
+    event;
   const id = pathParameters?.id;
   const origin = event.headers.origin || event.headers.Origin;
+  const isAllTransactionsRequest =
+    resource === '/transactions/all' || path.endsWith('/transactions/all');
 
   const userId = requestContext.authorizer?.claims?.sub;
   if (!userId) {
@@ -73,6 +76,28 @@ export const handler: APIGatewayProxyHandler = async (
     }
 
     if (httpMethod === 'GET') {
+      if (isAllTransactionsRequest) {
+        const res = await client.send(
+          new QueryCommand({
+            TableName: TABLE_NAME,
+            IndexName: TRANSACTIONS_BY_USER_INDEX,
+            KeyConditionExpression: 'userId = :userId',
+            ExpressionAttributeValues: marshall({ ':userId': userId }),
+            ScanIndexForward: false,
+          }),
+        );
+        const items = res.Items?.map((item) => unmarshall(item)) ?? [];
+
+        const preferredCurrency = await preferredCurrencyPromise;
+        const shapedItems = await Promise.all(
+          items.map((item) =>
+            toTransactionResponse(item, preferredCurrency, rateContext),
+          ),
+        );
+
+        return buildResponse(200, shapedItems, origin);
+      }
+
       let limit: number;
       let exclusiveStartKey: Record<string, unknown> | undefined;
       let monthPrefix: string | undefined;
