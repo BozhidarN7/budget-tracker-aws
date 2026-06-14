@@ -52,14 +52,14 @@ const materializeOneOccurrence = async (
   recurring: RecurringTransaction,
   occDate: string,
   summary: MaterializationSummary,
-): Promise<void> => {
+): Promise<boolean> => {
   const instanceId = `${recurring.id}-${occDate}`;
   try {
     const exists = await transactionExists(instanceId);
     if (exists) {
       summary.skipped += 1;
       await advanceRecurringPointer(recurring, occDate);
-      return;
+      return true;
     }
 
     const txn = buildMaterializedTransaction(recurring, occDate);
@@ -67,7 +67,7 @@ const materializeOneOccurrence = async (
     if (!created) {
       summary.skipped += 1;
       await advanceRecurringPointer(recurring, occDate);
-      return;
+      return true;
     }
 
     summary.created += 1;
@@ -86,6 +86,7 @@ const materializeOneOccurrence = async (
     }
 
     await advanceRecurringPointer(recurring, occDate);
+    return true;
   } catch (err) {
     summary.failures += 1;
     console.error('materializer: failed to materialize occurrence', {
@@ -93,6 +94,7 @@ const materializeOneOccurrence = async (
       occDate,
       error: (err as Error).message,
     });
+    return false;
   }
 };
 
@@ -109,7 +111,14 @@ const materializeForRule = async (
     safety < 1000
   ) {
     safety += 1;
-    await materializeOneOccurrence(current, current.nextOccurrence, summary);
+    const processed = await materializeOneOccurrence(
+      current,
+      current.nextOccurrence,
+      summary,
+    );
+    if (!processed) {
+      break;
+    }
     current.nextOccurrence = advanceOccurrencePointer(
       current.rule,
       current.nextOccurrence,
