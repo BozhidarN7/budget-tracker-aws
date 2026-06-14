@@ -82,6 +82,27 @@ export const createDataTables = (
     projectionType: dynamodb.ProjectionType.ALL,
   });
 
+  tables.Category.addGlobalSecondaryIndex({
+    indexName: 'userId-name-index',
+    partitionKey: { name: 'userId', type: dynamodb.AttributeType.STRING },
+    sortKey: { name: 'name', type: dynamodb.AttributeType.STRING },
+    projectionType: dynamodb.ProjectionType.ALL,
+  });
+
+  tables.Goal.addGlobalSecondaryIndex({
+    indexName: 'userId-targetDate-index',
+    partitionKey: { name: 'userId', type: dynamodb.AttributeType.STRING },
+    sortKey: { name: 'targetDate', type: dynamodb.AttributeType.STRING },
+    projectionType: dynamodb.ProjectionType.ALL,
+  });
+
+  recurringTransactionsTable.addGlobalSecondaryIndex({
+    indexName: 'userId-nextOccurrence-index',
+    partitionKey: { name: 'userId', type: dynamodb.AttributeType.STRING },
+    sortKey: { name: 'nextOccurrence', type: dynamodb.AttributeType.STRING },
+    projectionType: dynamodb.ProjectionType.ALL,
+  });
+
   return {
     userPreferencesTable,
     exchangeRatesTable,

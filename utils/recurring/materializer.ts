@@ -14,6 +14,7 @@ import {
   advanceRecurringPointer,
   incrementCategorySpend,
   putTransactionIfNotExists,
+  queryRecurringByUser,
   resolveCategoryId,
   scanAllRecurring,
   transactionExists,
@@ -131,9 +132,8 @@ export const materializeDueForUser = async (
     failures: 0,
   };
   const timezone = await getUserTimezone(userId);
-  const all = await scanAllRecurring();
-  const userRecurring = all.filter(
-    (r) => r.userId === userId && r.status === 'active',
+  const userRecurring = (await queryRecurringByUser(userId)).filter(
+    (r) => r.status === 'active',
   );
 
   for (const rule of userRecurring) {

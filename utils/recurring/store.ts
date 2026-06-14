@@ -3,7 +3,7 @@ import {
   DynamoDBClient,
   GetItemCommand,
   PutItemCommand,
-  ScanCommand,
+  QueryCommand,
   UpdateItemCommand,
   paginateQuery,
 } from '@aws-sdk/client-dynamodb';
@@ -132,9 +132,10 @@ const resolveCategoryId = async (
   let catId = category;
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-/.test(catId)) {
     const res = await client.send(
-      new ScanCommand({
+      new QueryCommand({
         TableName: ensureTable(CATEGORIES_TABLE, 'CATEGORIES_TABLE_NAME'),
-        FilterExpression: 'userId = :u AND #n = :n',
+        IndexName: 'userId-name-index',
+        KeyConditionExpression: 'userId = :u AND #n = :n',
         ExpressionAttributeNames: { '#n': 'name' },
         ExpressionAttributeValues: marshall(
           {
@@ -148,6 +149,36 @@ const resolveCategoryId = async (
     catId = res.Items?.map((i) => unmarshall(i))[0]?.id ?? '';
   }
   return catId;
+};
+
+const queryRecurringByUser = async (
+  userId: string,
+): Promise<RecurringTransaction[]> => {
+  const table = ensureTable(
+    RECURRING_TABLE,
+    'RECURRING_TRANSACTIONS_TABLE_NAME',
+  );
+  const items: RecurringTransaction[] = [];
+  const paginator = paginateQuery(
+    { client },
+    {
+      TableName: table,
+      IndexName: 'userId-nextOccurrence-index',
+      KeyConditionExpression: 'userId = :userId',
+      ExpressionAttributeValues: marshall(
+        { ':userId': userId },
+        { removeUndefinedValues: true },
+      ),
+    },
+  );
+  for await (const page of paginator) {
+    if (page.Items) {
+      items.push(
+        ...page.Items.map((i) => unmarshall(i) as RecurringTransaction),
+      );
+    }
+  }
+  return items;
 };
 
 const scanAllRecurring = async (): Promise<RecurringTransaction[]> => {
@@ -185,5 +216,6 @@ export {
   incrementCategorySpend,
   advanceRecurringPointer,
   resolveCategoryId,
+  queryRecurringByUser,
   scanAllRecurring,
 };

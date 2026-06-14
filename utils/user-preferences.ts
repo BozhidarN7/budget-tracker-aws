@@ -30,7 +30,7 @@ export const getUserPreference = async (
     }),
   );
 
-  if (!res.Item) {
+  if (!res?.Item) {
     return {
       userId,
       preferredCurrency: BASE_CURRENCY,
