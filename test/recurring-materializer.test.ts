@@ -22,6 +22,7 @@ jest.mock('@aws-sdk/client-dynamodb', () => {
 import {
   PutItemCommand,
   QueryCommand,
+  ScanCommand,
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
@@ -31,6 +32,10 @@ import {
   materializeDueForUser,
   materializeRecurring,
 } from '../utils/recurring';
+import {
+  queryRecurringByUser,
+  resolveCategoryId,
+} from '../utils/recurring/store';
 
 const makeRecurring = (
   overrides: Partial<RecurringTransaction> = {},
@@ -168,5 +173,87 @@ describe('category spend only for expense', () => {
       (c) => c[0] instanceof UpdateItemCommand,
     );
     expect(updateCalls.length).toBe(0);
+  });
+});
+
+describe('user-scoped recurring helper', () => {
+  beforeEach(() => {
+    mockSend.mockReset();
+  });
+
+  it('queries userId-nextOccurrence-index with the user as the key', async () => {
+    const rec = makeRecurring();
+    mockSend.mockResolvedValueOnce({ Items: [marshall(rec)] });
+
+    const result = await queryRecurringByUser('user-1');
+
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe('rec-1');
+    const command = mockSend.mock.calls[0][0] as QueryCommand;
+    expect(command.input.IndexName).toBe('userId-nextOccurrence-index');
+    expect(command.input.KeyConditionExpression).toBe('userId = :userId');
+    expect(command.input.ExpressionAttributeValues).toEqual({
+      ':userId': { S: 'user-1' },
+    });
+  });
+});
+
+describe('materializeDueForUser uses user-scoped recurring helper', () => {
+  beforeEach(() => {
+    mockSend.mockReset();
+  });
+
+  it('queries the user GSI instead of scanning the full table', async () => {
+    mockSend.mockResolvedValueOnce({}); // tz
+    mockSend.mockResolvedValueOnce({ Items: [] }); // user-scoped recurring query
+
+    await materializeDueForUser('user-1');
+
+    const recurringCalls = mockSend.mock.calls.filter(
+      (c) => c[0] instanceof QueryCommand,
+    );
+    expect(recurringCalls.length).toBe(1);
+    const command = recurringCalls[0][0] as QueryCommand;
+    expect(command.input.IndexName).toBe('userId-nextOccurrence-index');
+    expect(command.input.KeyConditionExpression).toBe('userId = :userId');
+    const scanCalls = mockSend.mock.calls.filter(
+      (c) => c[0] instanceof ScanCommand,
+    );
+    expect(scanCalls.length).toBe(0);
+  });
+});
+
+describe('resolveCategoryId uses user GSI', () => {
+  beforeEach(() => {
+    mockSend.mockReset();
+  });
+
+  it('queries userId-name-index for a non-UUID category name', async () => {
+    mockSend.mockResolvedValueOnce({
+      Items: [marshall({ id: 'cat-1', name: 'Food' })],
+    });
+
+    const id = await resolveCategoryId('user-1', 'Food');
+
+    expect(id).toBe('cat-1');
+    const command = mockSend.mock.calls[0][0] as QueryCommand;
+    expect(command.input.IndexName).toBe('userId-name-index');
+    expect(command.input.KeyConditionExpression).toBe(
+      'userId = :u AND #n = :n',
+    );
+    expect(command.input.ExpressionAttributeValues).toEqual({
+      ':u': { S: 'user-1' },
+      ':n': { S: 'Food' },
+    });
+    expect(command.input.ExpressionAttributeNames).toEqual({ '#n': 'name' });
+  });
+
+  it('returns the input unchanged for UUID-shaped category names', async () => {
+    const id = await resolveCategoryId(
+      'user-1',
+      '11111111-2222-3333-4444-555555555555',
+    );
+    expect(id).toBe('11111111-2222-3333-4444-555555555555');
+    expect(mockSend).not.toHaveBeenCalled();
   });
 });

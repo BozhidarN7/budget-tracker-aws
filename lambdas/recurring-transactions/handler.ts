@@ -5,7 +5,7 @@ import {
   DynamoDBClient,
   GetItemCommand,
   PutItemCommand,
-  ScanCommand,
+  QueryCommand,
 } from '@aws-sdk/client-dynamodb';
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 import {
@@ -179,11 +179,16 @@ export const handler: APIGatewayProxyHandler = async (
     }
 
     if (httpMethod === 'GET') {
-      const res = await client.send(new ScanCommand({ TableName: TABLE_NAME }));
-      const items =
-        res.Items?.map((item) => unmarshall(item)).filter(
-          (item) => item.userId === userId,
-        ) ?? [];
+      const res = await client.send(
+        new QueryCommand({
+          TableName: TABLE_NAME,
+          IndexName: 'userId-nextOccurrence-index',
+          KeyConditionExpression: 'userId = :userId',
+          ExpressionAttributeValues: marshall({ ':userId': userId }),
+          ScanIndexForward: true,
+        }),
+      );
+      const items = res.Items?.map((item) => unmarshall(item)) ?? [];
 
       const preferredCurrency = await preferredCurrencyPromise;
       const shaped = await Promise.all(
