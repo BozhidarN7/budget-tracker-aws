@@ -306,6 +306,14 @@ const parseArgs = () => {
 
 const toIsoDate = (date: Date): string => date.toISOString().slice(0, 10);
 
+const toSeedTransactionDate = (date: Date): string =>
+  date.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
+
 const addDays = (date: Date, days: number): Date => {
   const copy = new Date(date);
   copy.setUTCDate(copy.getUTCDate() + days);
@@ -348,30 +356,67 @@ const buildUserPreference = (userId: string): UserPreference => ({
   updatedAt: new Date().toISOString(),
 });
 
-const buildCategories = (userId: string): Category[] => {
+const getSeedMonths = (): string[] => {
   const now = new Date();
-  const months = Array.from({ length: 4 }, (_, index) =>
+
+  return Array.from({ length: 4 }, (_, index) =>
     addMonths(now, -index).toISOString().slice(0, 7),
   ).reverse();
+};
 
-  return categoryTemplates.slice(0, CATEGORY_COUNT).map((template, index) => {
+const toMonthKey = (dateLabel: string): string => {
+  const parsedDate = new Date(dateLabel);
+
+  if (Number.isNaN(parsedDate.getTime())) {
+    throw new Error(`Invalid seed transaction date: ${dateLabel}`);
+  }
+
+  return parsedDate.toISOString().slice(0, 7);
+};
+
+const buildCategorySpendByMonth = (
+  transactions: Transaction[],
+): Map<string, number> => {
+  const spendByMonth = new Map<string, number>();
+
+  for (const transaction of transactions) {
+    const month = toMonthKey(transaction.date);
+    const key = `${transaction.category}:${month}`;
+    const current = spendByMonth.get(key) ?? 0;
+    spendByMonth.set(
+      key,
+      Number((current + (transaction.baseAmount ?? 0)).toFixed(2)),
+    );
+  }
+
+  return spendByMonth;
+};
+
+const buildCategories = (
+  userId: string,
+  transactions: Transaction[],
+): Category[] => {
+  const months = getSeedMonths();
+  const spendByMonth = buildCategorySpendByMonth(transactions);
+
+  return categoryTemplates.slice(0, CATEGORY_COUNT).map((template) => {
     const monthlyData = Object.fromEntries(
-      months.map((month, monthIndex) => {
+      months.map((month) => {
+        const baseSpent = spendByMonth.get(`${template.name}:${month}`) ?? 0;
+
         if (template.type === 'income') {
           return [
             month,
             {
               limit: 0,
-              spent: 0,
+              spent: baseSpent,
               baseLimit: 0,
-              baseSpent: 0,
+              baseSpent,
             },
           ];
         }
 
-        const multiplier = 0.45 + monthIndex * 0.12 + index * 0.01;
         const baseLimit = template.monthlyLimit;
-        const baseSpent = Number((baseLimit * multiplier).toFixed(2));
 
         return [
           month,
@@ -455,7 +500,7 @@ const buildTransactions = (userId: string): Transaction[] => {
       ? pickFrom(incomeTransactionTemplates)
       : pickFrom(expenseTransactionTemplates);
     const amount = randomBetween(template.min, template.max);
-    const date = toIsoDate(addDays(now, -randomInt(0, 180)));
+    const date = toSeedTransactionDate(addDays(now, -randomInt(0, 180)));
     const id = randomUUID();
 
     transactions.push({
@@ -476,7 +521,7 @@ const buildTransactions = (userId: string): Transaction[] => {
   }
 
   return transactions.sort((left, right) =>
-    left.date.localeCompare(right.date),
+    (left.dateKey ?? '').localeCompare(right.dateKey ?? ''),
   );
 };
 
@@ -631,10 +676,10 @@ const main = async (): Promise<void> => {
     await resetUserData(userId);
   }
 
-  const categories = buildCategories(userId);
+  const transactions = buildTransactions(userId);
+  const categories = buildCategories(userId, transactions);
   const goals = buildGoals(userId);
   const recurringTransactions = buildRecurringTransactions(userId);
-  const transactions = buildTransactions(userId);
   const preference = buildUserPreference(userId);
 
   await writeUserPreference(preference);
@@ -678,3 +723,7 @@ main().catch((error: unknown) => {
   );
   process.exitCode = 1;
 });
+
+// eval "$(aws configure export-credentials --profile default --format env)"
+// export AWS_REGION=eu-central-1
+// npm run seed:dev -- --userId d3c468f2-7031-7026-ed4c-563c82403677 --reset
