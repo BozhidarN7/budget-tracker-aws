@@ -63,7 +63,8 @@ describe('buildMaterializedTransaction (pure)', () => {
     expect(txn.id).toBe('rec-xyz-2026-06-15');
     expect(txn.recurrenceId).toBe('rec-xyz');
     expect(txn.recurrenceInstanceDate).toBe('2026-06-15');
-    expect(txn.date).toBe('2026-06-15');
+    expect(txn.date).toBe('Jun 15, 2026');
+    expect(txn.dateKey).toBe('2026-06-15#rec-xyz-2026-06-15');
     expect(txn.materializedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 });

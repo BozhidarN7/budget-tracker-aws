@@ -3,6 +3,7 @@ import type {
   RecurringTransaction,
   Transaction,
 } from '../../types/budget';
+import { buildDateKey } from '../build-date-key';
 import { BASE_CURRENCY_CODE } from '../currency';
 import { getUserTimezone } from '../user-preferences';
 import {
@@ -25,6 +26,14 @@ export const buildMaterializedTransaction = (
   occurrenceDate: string,
 ): Transaction => {
   const instanceId = `${recurring.id}-${occurrenceDate}`;
+  const formattedDate = new Date(
+    `${occurrenceDate}T00:00:00Z`,
+  ).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
   return {
     id: instanceId,
     description: recurring.description,
@@ -37,7 +46,8 @@ export const buildMaterializedTransaction = (
     displayAmount: recurring.displayAmount,
     displayCurrency: recurring.displayCurrency,
     exchangeRateSnapshot: recurring.exchangeRateSnapshot,
-    date: occurrenceDate,
+    date: formattedDate,
+    dateKey: buildDateKey(formattedDate, instanceId),
     category: recurring.category,
     type: recurring.type,
     userId: recurring.userId,
